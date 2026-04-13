@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.env
+.venv/
+training_audio/
+tmp_audio/
+X_dataset.npy
+y_dataset.npy
+*.ipynb
+static/downloaded_*

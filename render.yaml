@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: live-chord-ai
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 7860

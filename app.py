@@ -1,0 +1,543 @@
+import asyncio
+import os
+import glob
+import numpy as np
+import librosa
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import List, Optional
+import threading
+import yt_dlp
+
+import imageio_ffmpeg
+import ytmusicapi
+
+import tensorflow as tf
+from transformer_model import (
+    build_transformer, CHORD_CLASSES, SEQUENCE_LENGTH, positional_encoding
+)
+
+ytmusic = ytmusicapi.YTMusic()
+
+# ==========================================
+# Load Transformer Model (if trained)
+# ==========================================
+MODEL_PATH = "transformer_chord_model.keras"
+TRANSFORMER_MODEL = None
+_MODEL_LOADED = False
+
+def load_transformer_model():
+    global TRANSFORMER_MODEL, _MODEL_LOADED
+    if _MODEL_LOADED:
+        return
+    _MODEL_LOADED = True
+    if not os.path.exists(MODEL_PATH):
+        print("[INFO] No trained model found. Using Chroma template fallback.")
+        print("       Run: python build_dataset.py --songs 300  then  python train.py")
+        return
+    try:
+        print(f"[INFO] Loading Transformer model from {MODEL_PATH}...")
+        TRANSFORMER_MODEL = build_transformer()
+        TRANSFORMER_MODEL.load_weights(MODEL_PATH)
+        print("[INFO] Transformer model loaded successfully.")
+    except Exception as e:
+        print(f"[WARN] Could not load model: {e}. Falling back to Chroma templates.")
+        TRANSFORMER_MODEL = None
+
+load_transformer_model()
+
+class SearchQuery(BaseModel):
+    query: str
+    video_id: Optional[str] = None
+
+# ==========================================
+# Audio Config
+# ==========================================
+SR = 22050
+DURATION = 1.0
+CHUNK_SAMPLES = int(SR * DURATION)
+HOP_LENGTH = 512
+VOLUME_THRESHOLD = 0.001
+
+# ==========================================
+# Chroma STFT Chord Templates
+# ==========================================
+PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+def create_chord_templates():
+    templates = {}
+    for i, root in enumerate(PITCH_CLASSES):
+        maj = np.zeros(12)
+        maj[i] = maj[(i + 4) % 12] = maj[(i + 7) % 12] = 1.0
+        templates[f"{root}"] = maj / np.linalg.norm(maj)
+
+        minor = np.zeros(12)
+        minor[i] = minor[(i + 3) % 12] = minor[(i + 7) % 12] = 1.0
+        templates[f"{root}m"] = minor / np.linalg.norm(minor)
+    return templates
+
+print("Initializing Chroma Chord Templates...")
+CHORD_TEMPLATES = create_chord_templates()
+
+# ==========================================
+# Audio Processing (Chroma STFT)
+# ==========================================
+def process_audio_chunk(audio_data):
+    if audio_data.ndim > 1:
+        audio_data = audio_data[:, 0]
+
+    rms = np.sqrt(np.mean(audio_data**2))
+    if rms < VOLUME_THRESHOLD:
+        return {"chord": "--", "confidence": 0.0, "volume": float(rms)}
+
+    chroma = librosa.feature.chroma_stft(y=audio_data, sr=SR, n_chroma=12)
+    chroma_vector = np.mean(chroma, axis=1)
+
+    norm = np.linalg.norm(chroma_vector)
+    if norm == 0:
+        return {"chord": "--", "confidence": 0.0, "volume": float(rms)}
+    chroma_vector = chroma_vector / norm
+
+    best_chord, best_score = "--", 0.0
+    for name, template in CHORD_TEMPLATES.items():
+        score = float(np.dot(chroma_vector, template))
+        if score > best_score:
+            best_score = score
+            best_chord = name
+
+    return {"chord": best_chord, "confidence": float(best_score), "volume": float(rms)}
+
+# ==========================================
+# YouTube Audio Downloader (yt-dlp)
+# ==========================================
+def _ytmusic_url(query):
+    """
+    Use ytmusicapi to find the best matching song on YouTube Music.
+    Returns a youtube.com watch URL, or None if nothing found.
+    Tries 'songs' filter first (official recordings), then 'videos' (music videos).
+    """
+    for filter_type in ('songs', 'videos'):
+        try:
+            results = ytmusic.search(query, filter=filter_type, limit=3)
+            for r in results:
+                vid = r.get('videoId')
+                if vid:
+                    title = r.get('title', '')
+                    artist = ''
+                    artists = r.get('artists', [])
+                    if artists:
+                        artist = artists[0].get('name', '')
+                    print(f"[YTMusic] Found ({filter_type}): {artist} — {title}  [{vid}]")
+                    return f"https://www.youtube.com/watch?v={vid}"
+        except Exception as e:
+            print(f"[YTMusic] search error ({filter_type}): {e}")
+    return None
+
+
+def download_audio(query, video_id=None):
+    import time as _time, uuid as _uuid
+    print(f"\nSearching YouTube Music for: '{query}'...")
+    os.makedirs("static", exist_ok=True)
+
+    # Use a UUID so filenames are always unique — avoids Windows file-lock
+    # collisions when the browser is still holding the previous .wav open.
+    # Old files are cleaned up here on a best-effort basis; failures are
+    # ignored because Windows won't release a lock until the browser unloads.
+    for f in glob.glob("static/downloaded_*.wav"):
+        try:
+            os.remove(f)
+            print(f"[Cleanup] Deleted {f}")
+        except OSError:
+            print(f"[Cleanup] Skipped (locked): {f}")
+
+    out_base = f"static/downloaded_{_uuid.uuid4().hex[:12]}"
+
+    # If a specific video ID was chosen by the user, use it directly;
+    # otherwise resolve via YouTube Music search, then fall back to generic search
+    if video_id:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+    else:
+        url = _ytmusic_url(query) or f"ytsearch1:{query}"
+    print(f"[Download] URL: {url}")
+
+    # Use system ffmpeg in Docker (apt-installed), fall back to imageio bundle locally
+    import shutil
+    ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': f'{out_base}.%(ext)s',
+        'noplaylist': True,
+        'quiet': False,
+        'ffmpeg_location': ffmpeg_path,
+        # Workarounds for cloud-server YouTube bot detection
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        'socket_timeout': 30,
+        'retries': 3,
+        'extractor_args': {'youtube': {'player_client': ['web']}},
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'wav',
+            'preferredquality': '192',
+        }]
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = "Unknown"
+            if info:
+                if 'entries' in info and len(info['entries']) > 0:
+                    title = info['entries'][0].get('title', title)
+                elif 'title' in info:
+                    title = info.get('title', title)
+            print(f"\nDownloaded: {title}\n")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Download error: {e}")
+        raise RuntimeError(f"YouTube download failed: {e}")
+
+    downloaded = glob.glob(f"{out_base}.*")
+    if not downloaded:
+        print("Error: audio file was not saved.")
+        return None
+
+    return os.path.basename(downloaded[0])
+
+# ==========================================
+# FastAPI Server
+# ==========================================
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(_app):
+    def open_browser():
+        import time, webbrowser
+        if os.environ.get("PORT"):   # running on a remote server — skip
+            return
+        time.sleep(2)
+        webbrowser.open("http://localhost:8080")
+    threading.Thread(target=open_browser, daemon=True).start()
+    yield
+
+app = FastAPI(lifespan=lifespan)
+active_connections: List[WebSocket] = []
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    Browser-based mic detection.
+    The client sends:
+      - text '{"command":"START"}' / '{"command":"STOP"}' to toggle listening
+      - binary frames of float32 PCM audio captured via getUserMedia
+    The server processes each chunk and replies with JSON chord detection results.
+    """
+    await websocket.accept()
+    active_connections.append(websocket)
+    audio_buffer = np.zeros(CHUNK_SAMPLES, dtype=np.float32)
+    is_listening = False
+    import time as _time
+    last_predict_time = 0.0
+
+    try:
+        while True:
+            msg = await websocket.receive()
+
+            # Text message: START / STOP toggle
+            if "text" in msg:
+                data = msg["text"]
+                if "START" in data:
+                    is_listening = True
+                    audio_buffer.fill(0)
+                    last_predict_time = 0.0
+                    print("Listening started (browser mic).")
+                elif "STOP" in data:
+                    is_listening = False
+                    audio_buffer.fill(0)
+                    print("Listening stopped.")
+                continue
+
+            # Binary message: raw float32 PCM from browser mic
+            if "bytes" in msg and is_listening:
+                pcm = np.frombuffer(msg["bytes"], dtype=np.float32)
+                if len(pcm) == 0:
+                    continue
+
+                # Rolling buffer — append new audio, shift old out
+                new_len = min(len(pcm), CHUNK_SAMPLES)
+                audio_buffer[:] = np.roll(audio_buffer, -new_len)
+                audio_buffer[-new_len:] = pcm[-new_len:]
+
+                result = process_audio_chunk(audio_buffer.copy())
+                if result:
+                    now = _time.time()
+                    if result['confidence'] > 0.60 and (now - last_predict_time > 1.0):
+                        print(f"Detected: {result['chord']} ({result['confidence']:.2f})", flush=True)
+                        await websocket.send_json(result)
+                        last_predict_time = now
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        if websocket in active_connections:
+            active_connections.remove(websocket)
+
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ==========================================
+# REST API Endpoints
+# ==========================================
+@app.post("/api/search")
+async def search_song(request: SearchQuery):
+    loop = asyncio.get_running_loop()
+    _q, _vid = request.query, request.video_id
+    try:
+        filename = await loop.run_in_executor(None, download_audio, _q, _vid)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not filename:
+        raise HTTPException(status_code=400, detail="Failed to download audio.")
+
+    def extract_chords_from_file(filepath):
+        """
+        Chord extraction pipeline for a full song.
+        Uses Transformer model if trained; falls back to Chroma templates.
+        Both paths apply HPSS + CQT for consistent preprocessing.
+        """
+        y, sr = librosa.load(filepath, sr=SR)
+        song_duration = float(len(y)) / SR
+
+        # Harmonic-Percussive separation — strips drums/transients before analysis
+        y_harmonic = librosa.effects.harmonic(y, margin=8)
+
+        # Chroma CQT with finer hop for better temporal resolution
+        FINE_HOP = HOP_LENGTH // 2          # 256 samples ≈ 11.6 ms/frame
+        chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=SR, hop_length=FINE_HOP)
+        chroma_T = chroma.T   # (T, 12)
+        T = chroma_T.shape[0]
+
+        # Beat tracking — base grid for sub-beat construction
+        _, beat_frames = librosa.beat.beat_track(
+            y=y_harmonic, sr=SR, hop_length=FINE_HOP, trim=False)
+        beat_frames = np.asarray(beat_frames, dtype=int)
+        beat_times  = librosa.frames_to_time(beat_frames, sr=SR, hop_length=FINE_HOP)
+        beat_times  = np.append(beat_times, song_duration)   # sentinel at end
+
+        # Estimate BPM for adaptive parameters
+        tempo_bpm = (60.0 / float(np.median(np.diff(beat_times[:-1])))
+                     if len(beat_times) > 2 else 100.0)
+        print(f"[Beat] tempo={tempo_bpm:.1f} BPM, {len(beat_frames)} beats detected")
+
+        # Build 8th-note sub-beat grid: interpolate midpoints between every pair of beats.
+        # This doubles temporal resolution — catches chord changes that fall on 8th-note
+        # positions in 6/8, 3/4, or any song with half-bar chord changes.
+        sub_times = []
+        for i in range(len(beat_times) - 1):
+            sub_times.append(float(beat_times[i]))
+            sub_times.append((float(beat_times[i]) + float(beat_times[i + 1])) / 2.0)
+        sub_times.append(float(beat_times[-1]))
+        sub_beat_times = np.array(sub_times)
+
+        # Snap tolerance: 55% of a sub-beat interval (half an 8th note)
+        median_sub = float(np.median(np.diff(sub_beat_times))) if len(sub_beat_times) > 2 else 0.25
+        max_snap   = median_sub * 0.55
+
+        def nearest_beat(t):
+            deltas = np.abs(sub_beat_times - t)
+            idx    = int(np.argmin(deltas))
+            return float(sub_beat_times[idx]) if deltas[idx] <= max_snap else float(t)
+
+        # Adaptive minimum segment duration based on estimated BPM.
+        # At high BPM a chord every 2 beats can be < 0.8 s — keep it.
+        if   tempo_bpm > 160: MIN_SEG = 0.25
+        elif tempo_bpm > 120: MIN_SEG = 0.40
+        elif tempo_bpm >  90: MIN_SEG = 0.60
+        else:                 MIN_SEG = 0.80
+        print(f"[Beat] MIN_SEG={MIN_SEG:.2f}s")
+
+        # Frames per model window — SEQUENCE_LENGTH=200 at FINE_HOP=256 ≈ 2.32 s
+        WIN_FRAMES = SEQUENCE_LENGTH           # 200 frames
+        STRIDE     = WIN_FRAMES // 2           # 100-frame stride → 50% overlap
+        secs_per_frame = FINE_HOP / SR         # ~11.6 ms
+
+        if TRANSFORMER_MODEL is not None:
+            # ── TRANSFORMER PATH (overlapping windows) ──────────────────
+            starts = list(range(0, T - WIN_FRAMES + 1, STRIDE))
+            if not starts:
+                return []
+
+            windows = np.array(
+                [chroma_T[s : s + WIN_FRAMES] for s in starts],
+                dtype=np.float32
+            )   # (N, 200, 12)
+
+            probs        = TRANSFORMER_MODEL.predict(windows, verbose=0, batch_size=32)
+            pred_classes = np.argmax(probs, axis=1)
+            pred_confs   = np.max(probs, axis=1)
+
+            raw = [
+                (CHORD_CLASSES[pred_classes[i]],
+                 starts[i] * secs_per_frame,
+                 float(pred_confs[i]))
+                for i in range(len(starts))
+            ]
+        else:
+            # ── CHROMA TEMPLATE FALLBACK (sub-beat-synchronous classification) ──
+            # Build frame indices for sub-beat times (excluding the sentinel).
+            # clip to [0, T-1] so no out-of-bounds frames reach librosa.util.sync.
+            sub_beat_frames = np.clip(
+                np.round(sub_beat_times[:-1] * SR / FINE_HOP).astype(int), 0, T - 1
+            )
+            beat_chroma   = librosa.util.sync(chroma, sub_beat_frames, aggregate=np.median)
+            # beat_chroma shape: (12, num_sub_beats)
+            beat_chroma_T = beat_chroma.T   # (num_sub_beats, 12)
+            num_sub_beats = beat_chroma_T.shape[0]
+            raw = []
+            for i in range(num_sub_beats):
+                # 3-sub-beat context window centred on current position
+                win = beat_chroma_T[max(0, i - 1) : min(num_sub_beats, i + 2)]
+                vec = np.median(win, axis=0)
+                # Suppress weak tones (< 38% of peak)
+                peak = np.max(vec)
+                if peak <= 0:
+                    continue
+                vec = np.where(vec > 0.38 * peak, vec, 0)
+                norm = np.linalg.norm(vec)
+                if norm == 0:
+                    continue
+                vec = vec / norm
+                best_chord, best_score = "--", 0.0
+                for name, template in CHORD_TEMPLATES.items():
+                    score = float(np.dot(vec, template))
+                    if score > best_score:
+                        best_score = score
+                        best_chord = name
+                if best_score >= 0.65:
+                    raw.append((best_chord, float(sub_beat_times[i]), best_score))
+
+        # ── TEMPORAL SMOOTHING: merge consecutive identical chords ──────
+        timeline = []
+        if raw:
+            current_chord, current_start, _ = raw[0]
+            for chord, t, conf in raw[1:]:
+                if chord != current_chord:
+                    if current_chord != "--":
+                        timeline.append({
+                            "start": round(current_start, 3),
+                            "end":   round(t, 3),
+                            "chord": current_chord
+                        })
+                    current_chord, current_start = chord, t
+            if current_chord != "--":
+                timeline.append({
+                    "start": round(current_start, 3),
+                    "end":   round(song_duration, 3),
+                    "chord": current_chord
+                })
+
+        # ── BEAT-SNAP: align boundaries to beat grid (transformer path only) ──
+        if TRANSFORMER_MODEL is not None and timeline:
+            snapped = []
+            for seg in timeline:
+                s = nearest_beat(seg["start"])
+                e = nearest_beat(seg["end"])
+                if e > s:
+                    snapped.append({"start": round(s, 3), "end": round(e, 3), "chord": seg["chord"]})
+            timeline = snapped
+
+        # ── SEGMENT FILTERING ────────────────────────────────────────────
+        # Remove segments shorter than MIN_SEG (adaptive to tempo)
+        timeline = [s for s in timeline if (s["end"] - s["start"]) >= MIN_SEG]
+
+        # Re-merge any adjacent identical chords exposed after filtering
+        merged = []
+        for seg in timeline:
+            if merged and merged[-1]["chord"] == seg["chord"]:
+                merged[-1]["end"] = seg["end"]
+            else:
+                merged.append(seg)
+        timeline = merged
+
+        return timeline
+
+    try:
+        timeline = await loop.run_in_executor(None, extract_chords_from_file, f"static/{filename}")
+    except Exception as e:
+        print(f"Chroma extraction error: {e}")
+        raise HTTPException(status_code=500, detail="Chord extraction failed.")
+
+    # Compute main chords: rank by total duration, keep those >= 4% of chord time
+    chord_dur = {}
+    for seg in timeline:
+        c = seg['chord']
+        if c != '--':
+            chord_dur[c] = chord_dur.get(c, 0) + (seg['end'] - seg['start'])
+    total_dur = sum(chord_dur.values()) or 1.0
+    main_chords = [
+        c for c, d in sorted(chord_dur.items(), key=lambda x: -x[1])
+        if d / total_dur >= 0.04
+    ][:8]
+
+    return {"audio_url": f"/static/{filename}", "timeline": timeline, "main_chords": main_chords}
+
+@app.get("/api/suggest")
+async def suggest_songs(q: str = ""):
+    if not q:
+        return []
+    try:
+        loop = asyncio.get_running_loop()
+
+        def _search():
+            results = ytmusic.search(q, filter='songs', limit=8)
+            suggestions = []
+            for r in results:
+                vid = r.get('videoId')
+                if not vid:
+                    continue
+                artists = r.get('artists') or []
+                artist = artists[0].get('name', '') if artists else ''
+                thumbnails = r.get('thumbnails') or []
+                thumb = thumbnails[-1].get('url', '') if thumbnails else ''
+                suggestions.append({
+                    'videoId': vid,
+                    'title':    r.get('title', ''),
+                    'artist':   artist,
+                    'duration': r.get('duration', ''),
+                    'thumbnail': thumb,
+                })
+            return suggestions
+
+        return await loop.run_in_executor(None, _search)
+    except Exception as e:
+        print(f"Suggest error: {e}")
+        return []
+
+@app.get("/api/autocomplete")
+async def autocomplete(q: str = ""):
+    if not q:
+        return []
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, ytmusic.get_search_suggestions, q)
+    except Exception as e:
+        print(f"Autocomplete error: {e}")
+        return []
+
+@app.get("/")
+def read_root():
+    return FileResponse("static/index.html")
+
+if __name__ == "__main__":
+    import uvicorn
+    os.makedirs("static", exist_ok=True)
+    port = int(os.environ.get("PORT", 8080))
+    print(f"Starting FastAPI Server on port {port}...")
+    uvicorn.run("app:app", host="0.0.0.0", port=port)

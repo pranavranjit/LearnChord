@@ -1,0 +1,19 @@
+# Training artefacts — not needed at runtime
+training_audio/
+tmp_audio/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+
+# Jupyter notebooks
+*.ipynb
+
+# Local env
+.env
+*.env
+
+# Old dataset files (model is already baked in)
+X_dataset.npy
+y_dataset.npy
