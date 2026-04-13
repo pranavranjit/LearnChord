@@ -177,7 +177,7 @@ def download_audio(query, video_id=None):
         },
         'socket_timeout': 30,
         'retries': 3,
-        'extractor_args': {'youtube': {'player_client': ['web']}},
+        'extractor_args': {'youtube': {'player_client': ['mediaconnect', 'tv', 'web']}},
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'wav',
