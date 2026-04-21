@@ -232,7 +232,10 @@ const LOADING_MESSAGES = [
     'Downloading audio…',
     'Separating harmonics…',
     'Extracting chroma features…',
+    'Tracking beats…',
+    'Running transformer inference…',
     'Detecting chord patterns…',
+    'Analysis takes up to 2 minutes on free tier…',
     'Almost there…',
 ];
 let loadingInterval = null;

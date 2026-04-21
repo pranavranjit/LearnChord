@@ -8,7 +8,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional
-import threading
 import yt_dlp
 
 import imageio_ffmpeg
@@ -211,20 +210,7 @@ def download_audio(query, video_id=None):
 # ==========================================
 # FastAPI Server
 # ==========================================
-from contextlib import asynccontextmanager
-
-@asynccontextmanager
-async def lifespan(_app):
-    def open_browser():
-        import time, webbrowser
-        if os.environ.get("PORT"):   # running on a remote server — skip
-            return
-        time.sleep(2)
-        webbrowser.open("http://localhost:8080")
-    threading.Thread(target=open_browser, daemon=True).start()
-    yield
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 active_connections: List[WebSocket] = []
 
 @app.websocket("/ws")
@@ -312,11 +298,16 @@ async def search_song(request: SearchQuery):
         Uses Transformer model if trained; falls back to Chroma templates.
         Both paths apply HPSS + CQT for consistent preprocessing.
         """
-        y, sr = librosa.load(filepath, sr=SR)
+        # Cap analysis length on low-CPU hosts to keep response times reasonable.
+        # HF Spaces cpu-basic is ~4x slower than typical laptops; 3.5 min is enough
+        # for most songs to show their full chord progression.
+        MAX_ANALYSIS_SEC = 210
+        y, sr = librosa.load(filepath, sr=SR, duration=MAX_ANALYSIS_SEC)
         song_duration = float(len(y)) / SR
 
-        # Harmonic-Percussive separation — strips drums/transients before analysis
-        y_harmonic = librosa.effects.harmonic(y, margin=8)
+        # Harmonic-Percussive separation — lower margin is ~3x faster with
+        # minimal impact on chord detection quality.
+        y_harmonic = librosa.effects.harmonic(y, margin=3)
 
         # Chroma CQT with finer hop for better temporal resolution
         FINE_HOP = HOP_LENGTH // 2          # 256 samples ≈ 11.6 ms/frame
