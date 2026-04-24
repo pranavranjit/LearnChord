@@ -61,27 +61,60 @@ HOP_LENGTH = 512
 VOLUME_THRESHOLD = 0.001
 
 # ==========================================
-# Chroma STFT Chord Templates
+# Guitar-aware Chord Templates
 # ==========================================
+# Weights approximate typical guitar voicings:
+#   - Root heavier (often doubled: bass string + octave on higher strings)
+#   - 3rd slightly lighter (sometimes omitted or sounded weaker)
+#   - 5th standard (doubled in barre chords)
+# Power / sus chords included because guitarists play them constantly
+# and they currently get mis-labelled as maj/min.
 PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 def create_chord_templates():
     templates = {}
     for i, root in enumerate(PITCH_CLASSES):
+        # Major triad (guitar-weighted)
         maj = np.zeros(12)
-        maj[i] = maj[(i + 4) % 12] = maj[(i + 7) % 12] = 1.0
+        maj[i]            = 1.3
+        maj[(i + 4) % 12] = 0.9
+        maj[(i + 7) % 12] = 1.0
         templates[f"{root}"] = maj / np.linalg.norm(maj)
 
+        # Minor triad
         minor = np.zeros(12)
-        minor[i] = minor[(i + 3) % 12] = minor[(i + 7) % 12] = 1.0
+        minor[i]            = 1.3
+        minor[(i + 3) % 12] = 0.9
+        minor[(i + 7) % 12] = 1.0
         templates[f"{root}m"] = minor / np.linalg.norm(minor)
+
+        # Power chord (root + 5th, no 3rd) — rock/punk/metal staple
+        power = np.zeros(12)
+        power[i]            = 1.4
+        power[(i + 7) % 12] = 1.0
+        templates[f"{root}5"] = power / np.linalg.norm(power)
+
+        # sus2 (root + 2nd + 5th)
+        sus2 = np.zeros(12)
+        sus2[i]            = 1.2
+        sus2[(i + 2) % 12] = 0.9
+        sus2[(i + 7) % 12] = 1.0
+        templates[f"{root}sus2"] = sus2 / np.linalg.norm(sus2)
+
+        # sus4 (root + 4th + 5th)
+        sus4 = np.zeros(12)
+        sus4[i]            = 1.2
+        sus4[(i + 5) % 12] = 0.9
+        sus4[(i + 7) % 12] = 1.0
+        templates[f"{root}sus4"] = sus4 / np.linalg.norm(sus4)
     return templates
 
 print("Initializing Chroma Chord Templates...")
 CHORD_TEMPLATES = create_chord_templates()
 
 # ==========================================
-# Audio Processing (Chroma STFT)
+# Audio Processing — unified feature pipeline
+# Mic path now matches offline extraction: HPSS + chroma_cqt.
 # ==========================================
 def process_audio_chunk(audio_data):
     if audio_data.ndim > 1:
@@ -91,7 +124,14 @@ def process_audio_chunk(audio_data):
     if rms < VOLUME_THRESHOLD:
         return {"chord": "--", "confidence": 0.0, "volume": float(rms)}
 
-    chroma = librosa.feature.chroma_stft(y=audio_data, sr=SR, n_chroma=12)
+    # Harmonic-percussive separation strips pick/strum transients before analysis.
+    # margin=3 matches extract_chords_from_file() for consistency.
+    try:
+        y_h = librosa.effects.harmonic(audio_data, margin=3)
+    except Exception:
+        y_h = audio_data
+
+    chroma = librosa.feature.chroma_cqt(y=y_h, sr=SR, hop_length=HOP_LENGTH // 2)
     chroma_vector = np.mean(chroma, axis=1)
 
     norm = np.linalg.norm(chroma_vector)

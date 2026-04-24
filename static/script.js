@@ -373,10 +373,15 @@ async function extractChords(videoId, query) {
 }
 
 // ── Timeline Rendering ────────────────────────────────────────────────────────
+// Extract root from any chord name (C, Cm, C5, Csus2, Csus4, F#m, etc.)
+function chordRoot(chordName) {
+    if (!chordName) return '';
+    // Handle sharp roots (2-char) first, then naturals
+    if (chordName.length >= 2 && chordName[1] === '#') return chordName.slice(0, 2);
+    return chordName.slice(0, 1);
+}
 function chordColor(chordName, opacity) {
-    const isMinor = chordName.endsWith('m');
-    const root    = isMinor ? chordName.slice(0, -1) : chordName;
-    const rgb     = CHORD_COLORS[root] || '100,100,200';
+    const rgb = CHORD_COLORS[chordRoot(chordName)] || '100,100,200';
     return `rgba(${rgb}, ${opacity})`;
 }
 
