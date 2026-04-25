@@ -155,23 +155,27 @@ def _ytmusic_url(query):
     """
     Use ytmusicapi to find the best matching song on YouTube Music.
     Returns a youtube.com watch URL, or None if nothing found.
-    Tries 'songs' filter first (official recordings), then 'videos' (music videos).
+    Retries on SSL/network errors; falls through to yt-dlp's caller search if it fails.
     """
+    import time as _time
     for filter_type in ('songs', 'videos'):
-        try:
-            results = ytmusic.search(query, filter=filter_type, limit=3)
-            for r in results:
-                vid = r.get('videoId')
-                if vid:
-                    title = r.get('title', '')
-                    artist = ''
-                    artists = r.get('artists', [])
-                    if artists:
-                        artist = artists[0].get('name', '')
-                    print(f"[YTMusic] Found ({filter_type}): {artist} — {title}  [{vid}]")
-                    return f"https://www.youtube.com/watch?v={vid}"
-        except Exception as e:
-            print(f"[YTMusic] search error ({filter_type}): {e}")
+        for attempt in range(3):
+            try:
+                results = ytmusic.search(query, filter=filter_type, limit=3)
+                for r in results:
+                    vid = r.get('videoId')
+                    if vid:
+                        title = r.get('title', '')
+                        artist = ''
+                        artists = r.get('artists', [])
+                        if artists:
+                            artist = artists[0].get('name', '')
+                        print(f"[YTMusic] Found ({filter_type}): {artist} — {title}  [{vid}]")
+                        return f"https://www.youtube.com/watch?v={vid}"
+                break  # got results but no videoIds — try next filter
+            except Exception as e:
+                print(f"[YTMusic] {filter_type} attempt {attempt+1}/3: {e}")
+                _time.sleep(0.5 * (attempt + 1))
     return None
 
 
@@ -519,15 +523,68 @@ async def search_song(request: SearchQuery):
 
     return {"audio_url": f"/static/{filename}", "timeline": timeline, "main_chords": main_chords}
 
+def _ytmusic_search_with_retry(query, limit=8, attempts=3):
+    """ytmusicapi over HF cloud often hits SSL EOF — retry with backoff."""
+    import time as _time
+    last_err = None
+    for i in range(attempts):
+        try:
+            return ytmusic.search(query, filter='songs', limit=limit)
+        except Exception as e:
+            last_err = e
+            print(f"[YTMusic] search attempt {i+1}/{attempts} failed: {e}")
+            _time.sleep(0.5 * (i + 1))
+    raise last_err if last_err else RuntimeError("ytmusic search failed")
+
+
+def _ytdlp_search_fallback(query, limit=8):
+    """Fallback search using yt-dlp's flat extraction when ytmusicapi is down."""
+    ydl_opts = {
+        'quiet': True,
+        'extract_flat': True,
+        'skip_download': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        'extractor_args': {'youtube': {'player_client': ['mediaconnect', 'tv', 'web']}},
+    }
+    suggestions = []
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
+        if not info or 'entries' not in info:
+            return []
+        for r in info['entries']:
+            vid = r.get('id')
+            if not vid:
+                continue
+            thumb = ''
+            thumbs = r.get('thumbnails') or []
+            if thumbs:
+                thumb = thumbs[-1].get('url', '')
+            duration_sec = r.get('duration')
+            duration_str = ''
+            if duration_sec:
+                m, s = divmod(int(duration_sec), 60)
+                duration_str = f"{m}:{s:02d}"
+            suggestions.append({
+                'videoId': vid,
+                'title':    r.get('title', ''),
+                'artist':   r.get('uploader', '') or r.get('channel', ''),
+                'duration': duration_str,
+                'thumbnail': thumb,
+            })
+    return suggestions
+
+
 @app.get("/api/suggest")
 async def suggest_songs(q: str = ""):
     if not q:
         return []
-    try:
-        loop = asyncio.get_running_loop()
+    loop = asyncio.get_running_loop()
 
-        def _search():
-            results = ytmusic.search(q, filter='songs', limit=8)
+    def _search():
+        try:
+            results = _ytmusic_search_with_retry(q, limit=8)
             suggestions = []
             for r in results:
                 vid = r.get('videoId')
@@ -544,12 +601,19 @@ async def suggest_songs(q: str = ""):
                     'duration': r.get('duration', ''),
                     'thumbnail': thumb,
                 })
-            return suggestions
+            if suggestions:
+                return suggestions
+        except Exception as e:
+            print(f"[Suggest] ytmusic failed: {e}; falling back to yt-dlp search")
 
-        return await loop.run_in_executor(None, _search)
-    except Exception as e:
-        print(f"Suggest error: {e}")
-        return []
+        # Fallback: yt-dlp's ytsearch
+        try:
+            return _ytdlp_search_fallback(q, limit=8)
+        except Exception as e:
+            print(f"[Suggest] yt-dlp fallback failed: {e}")
+            return []
+
+    return await loop.run_in_executor(None, _search)
 
 @app.get("/api/autocomplete")
 async def autocomplete(q: str = ""):
