@@ -11,8 +11,9 @@ numpy>=1.24.0
 # Deep learning — CPU-only build (lighter, no CUDA deps, works on all servers)
 tensorflow-cpu>=2.13.0
 
-# YouTube / audio download
+# YouTube / audio download (yt-dlp primary, pytubefix fallback when blocked)
 yt-dlp>=2024.1.0
+pytubefix>=8.0.0
 imageio-ffmpeg>=0.4.9
 
 # Music search / autocomplete

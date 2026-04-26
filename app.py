@@ -206,43 +206,106 @@ def download_audio(query, video_id=None):
     print(f"[Download] URL: {url}")
 
     # Use system ffmpeg in Docker (apt-installed), fall back to imageio bundle locally
-    import shutil
+    import shutil, subprocess
     ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
-    ydl_opts = {
+
+    # Optional cookies file (HF admin can set YT_COOKIES_FILE in Space secrets)
+    cookies_file = os.environ.get("YT_COOKIES_FILE")
+    if cookies_file and not os.path.exists(cookies_file):
+        cookies_file = None
+
+    success = False
+    title = "Unknown"
+
+    # ── Strategy 1: yt-dlp with rotating player clients ─────────────────
+    client_order = [
+        ['tv_simply'], ['mediaconnect'], ['mweb'], ['ios'], ['tv'], ['web'],
+    ]
+    base_opts = {
         'format': 'bestaudio/best',
         'outtmpl': f'{out_base}.%(ext)s',
         'noplaylist': True,
-        'quiet': False,
+        'quiet': True,
+        'no_warnings': True,
         'ffmpeg_location': ffmpeg_path,
-        # Workarounds for cloud-server YouTube bot detection
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         },
         'socket_timeout': 30,
-        'retries': 3,
-        'extractor_args': {'youtube': {'player_client': ['mediaconnect', 'tv', 'web']}},
+        'retries': 2,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'wav',
             'preferredquality': '192',
         }]
     }
+    if cookies_file:
+        base_opts['cookiefile'] = cookies_file
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = "Unknown"
-            if info:
-                if 'entries' in info and len(info['entries']) > 0:
-                    title = info['entries'][0].get('title', title)
-                elif 'title' in info:
-                    title = info.get('title', title)
-            print(f"\nDownloaded: {title}\n")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"Download error: {e}")
-        raise RuntimeError(f"YouTube download failed: {e}")
+    for client in client_order:
+        opts = dict(base_opts)
+        opts['extractor_args'] = {'youtube': {'player_client': client}}
+        print(f"[Download] yt-dlp player_client={client[0]}...")
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if info:
+                    if 'entries' in info and len(info['entries']) > 0:
+                        title = info['entries'][0].get('title', title)
+                    elif 'title' in info:
+                        title = info.get('title', title)
+                success = True
+                print(f"[Download] OK via yt-dlp/{client[0]}: {title}")
+                break
+        except Exception as e:
+            err_msg = str(e).lower()
+            if 'sign in' in err_msg or 'bot' in err_msg or 'confirm' in err_msg:
+                continue
+            print(f"[Download] {client[0]} failed (non-bot): {e}")
+            break
+
+    # ── Strategy 2: pytubefix fallback (different YouTube API path) ─────
+    if not success:
+        print("[Download] yt-dlp exhausted, trying pytubefix...")
+        try:
+            from pytubefix import YouTube
+            # Resolve URL → video id; pytubefix needs a watch URL
+            target_url = url if url.startswith('http') else None
+            if not target_url:
+                # url was an ytsearch query — need to extract via yt-dlp's search
+                with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
+                    s = ydl.extract_info(url, download=False)
+                    if s and s.get('entries'):
+                        target_url = f"https://www.youtube.com/watch?v={s['entries'][0]['id']}"
+            if target_url:
+                yt = YouTube(target_url)
+                stream = yt.streams.get_audio_only()
+                if stream is None:
+                    raise RuntimeError("No audio stream available")
+                tmp_name = f"{os.path.basename(out_base)}.m4a"
+                stream.download(output_path="static", filename=tmp_name)
+                tmp_path = f"static/{tmp_name}"
+                wav_path = f"{out_base}.wav"
+                subprocess.run(
+                    [ffmpeg_path, "-y", "-i", tmp_path, "-ar", str(SR), wav_path],
+                    check=True, capture_output=True,
+                )
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+                title = yt.title
+                success = True
+                print(f"[Download] OK via pytubefix: {title}")
+        except Exception as e:
+            print(f"[Download] pytubefix failed: {e}")
+
+    if not success:
+        # Friendly message for end users — no implementation details
+        raise RuntimeError(
+            "Couldn't fetch this song right now. "
+            "YouTube is rate-limiting our server — please try a different song or try again in a moment."
+        )
 
     downloaded = glob.glob(f"{out_base}.*")
     if not downloaded:
