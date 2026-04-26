@@ -395,9 +395,18 @@ async def search_song(request: SearchQuery):
     try:
         filename = await loop.run_in_executor(None, download_audio, _q, _vid)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        detail = str(exc)
+        # Final safety net — never leak YouTube/yt-dlp internals to end users.
+        # Any download-side error gets sanitised to a friendly message.
+        bot_markers = ['sign in', 'confirm you', 'not a bot',
+                       '[youtube]', 'yt-dlp', 'cookies', 'extractor',
+                       'download failed']
+        if any(m in detail.lower() for m in bot_markers):
+            detail = ("Couldn't fetch this song right now. "
+                      "Please try a different song or try again in a moment.")
+        raise HTTPException(status_code=400, detail=detail)
     if not filename:
-        raise HTTPException(status_code=400, detail="Failed to download audio.")
+        raise HTTPException(status_code=400, detail="Couldn't fetch this song. Please try another.")
 
     def extract_chords_from_file(filepath):
         """
