@@ -691,12 +691,24 @@ async def suggest_songs(q: str = ""):
 async def autocomplete(q: str = ""):
     if not q:
         return []
-    try:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, ytmusic.get_search_suggestions, q)
-    except Exception as e:
-        print(f"Autocomplete error: {e}")
+    loop = asyncio.get_running_loop()
+
+    def _suggest():
+        # ytmusicapi sometimes drops SSL on HF cloud — retry once, fail silently.
+        import time as _time
+        for attempt in range(2):
+            try:
+                return ytmusic.get_search_suggestions(q)
+            except Exception as e:
+                if attempt == 0:
+                    _time.sleep(0.4)
+                    continue
+                # Final attempt failed — log once at debug level, return empty.
+                print(f"[Autocomplete] suggestion fetch failed: {type(e).__name__}")
+                return []
         return []
+
+    return await loop.run_in_executor(None, _suggest)
 
 @app.get("/")
 def read_root():
