@@ -259,9 +259,16 @@ def download_audio(query, video_id=None):
                 break
         except Exception as e:
             err_msg = str(e).lower()
-            if 'sign in' in err_msg or 'bot' in err_msg or 'confirm' in err_msg:
+            transient = (
+                'sign in' in err_msg or 'bot' in err_msg or 'confirm' in err_msg
+                or 'ssl' in err_msg or 'eof' in err_msg
+                or 'unable to download' in err_msg or 'http error' in err_msg
+                or 'timeout' in err_msg or 'connection' in err_msg
+            )
+            if transient:
+                print(f"[Download] {client[0]} transient error, trying next client…")
                 continue
-            print(f"[Download] {client[0]} failed (non-bot): {e}")
+            print(f"[Download] {client[0]} failed (non-transient): {e}")
             break
 
     # ── Strategy 2: pytubefix fallback (different YouTube API path) ─────
@@ -398,10 +405,13 @@ async def search_song(request: SearchQuery):
         detail = str(exc)
         # Final safety net — never leak YouTube/yt-dlp internals to end users.
         # Any download-side error gets sanitised to a friendly message.
-        bot_markers = ['sign in', 'confirm you', 'not a bot',
-                       '[youtube]', 'yt-dlp', 'cookies', 'extractor',
-                       'download failed']
-        if any(m in detail.lower() for m in bot_markers):
+        leak_markers = [
+            'sign in', 'confirm you', 'not a bot',
+            '[youtube]', 'yt-dlp', 'cookies', 'extractor',
+            'download failed', 'ssl', 'eof', 'unable to',
+            'http error', 'timeout', 'connection', 'pytubefix',
+        ]
+        if any(m in detail.lower() for m in leak_markers):
             detail = ("Couldn't fetch this song right now. "
                       "Please try a different song or try again in a moment.")
         raise HTTPException(status_code=400, detail=detail)
