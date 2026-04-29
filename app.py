@@ -3,7 +3,7 @@ import os
 import glob
 import numpy as np
 import librosa
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -395,6 +395,169 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ==========================================
 # REST API Endpoints
 # ==========================================
+def extract_chords_from_file(filepath):
+    """
+    Chord extraction pipeline for a full song.
+    Uses Transformer model if trained; falls back to Chroma templates.
+    Both paths apply HPSS + CQT for consistent preprocessing.
+    """
+    MAX_ANALYSIS_SEC = 210
+    y, sr = librosa.load(filepath, sr=SR, duration=MAX_ANALYSIS_SEC)
+    song_duration = float(len(y)) / SR
+
+    y_harmonic = librosa.effects.harmonic(y, margin=3)
+
+    FINE_HOP = HOP_LENGTH // 2
+    chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=SR, hop_length=FINE_HOP)
+    chroma_T = chroma.T
+    T = chroma_T.shape[0]
+
+    _, beat_frames = librosa.beat.beat_track(
+        y=y_harmonic, sr=SR, hop_length=FINE_HOP, trim=False)
+    beat_frames = np.asarray(beat_frames, dtype=int)
+    beat_times  = librosa.frames_to_time(beat_frames, sr=SR, hop_length=FINE_HOP)
+    beat_times  = np.append(beat_times, song_duration)
+
+    tempo_bpm = (60.0 / float(np.median(np.diff(beat_times[:-1])))
+                 if len(beat_times) > 2 else 100.0)
+    print(f"[Beat] tempo={tempo_bpm:.1f} BPM, {len(beat_frames)} beats detected")
+
+    sub_times = []
+    for i in range(len(beat_times) - 1):
+        sub_times.append(float(beat_times[i]))
+        sub_times.append((float(beat_times[i]) + float(beat_times[i + 1])) / 2.0)
+    sub_times.append(float(beat_times[-1]))
+    sub_beat_times = np.array(sub_times)
+
+    median_sub = float(np.median(np.diff(sub_beat_times))) if len(sub_beat_times) > 2 else 0.25
+    max_snap   = median_sub * 0.55
+
+    def nearest_beat(t):
+        deltas = np.abs(sub_beat_times - t)
+        idx    = int(np.argmin(deltas))
+        return float(sub_beat_times[idx]) if deltas[idx] <= max_snap else float(t)
+
+    if   tempo_bpm > 160: MIN_SEG = 0.25
+    elif tempo_bpm > 120: MIN_SEG = 0.40
+    elif tempo_bpm >  90: MIN_SEG = 0.60
+    else:                 MIN_SEG = 0.80
+    print(f"[Beat] MIN_SEG={MIN_SEG:.2f}s")
+
+    WIN_FRAMES = SEQUENCE_LENGTH
+    STRIDE     = WIN_FRAMES // 2
+    secs_per_frame = FINE_HOP / SR
+
+    if TRANSFORMER_MODEL is not None:
+        starts = list(range(0, T - WIN_FRAMES + 1, STRIDE))
+        if not starts:
+            return []
+        windows = np.array(
+            [chroma_T[s : s + WIN_FRAMES] for s in starts],
+            dtype=np.float32
+        )
+        probs        = TRANSFORMER_MODEL.predict(windows, verbose=0, batch_size=32)
+        pred_classes = np.argmax(probs, axis=1)
+        pred_confs   = np.max(probs, axis=1)
+        raw = [
+            (CHORD_CLASSES[pred_classes[i]],
+             starts[i] * secs_per_frame,
+             float(pred_confs[i]))
+            for i in range(len(starts))
+        ]
+    else:
+        sub_beat_frames = np.clip(
+            np.round(sub_beat_times[:-1] * SR / FINE_HOP).astype(int), 0, T - 1
+        )
+        beat_chroma   = librosa.util.sync(chroma, sub_beat_frames, aggregate=np.median)
+        beat_chroma_T = beat_chroma.T
+        num_sub_beats = beat_chroma_T.shape[0]
+        raw = []
+        for i in range(num_sub_beats):
+            win = beat_chroma_T[max(0, i - 1) : min(num_sub_beats, i + 2)]
+            vec = np.median(win, axis=0)
+            peak = np.max(vec)
+            if peak <= 0:
+                continue
+            vec = np.where(vec > 0.38 * peak, vec, 0)
+            norm = np.linalg.norm(vec)
+            if norm == 0:
+                continue
+            vec = vec / norm
+            best_chord, best_score = "--", 0.0
+            for name, template in CHORD_TEMPLATES.items():
+                score = float(np.dot(vec, template))
+                if score > best_score:
+                    best_score = score
+                    best_chord = name
+            if best_score >= 0.65:
+                raw.append((best_chord, float(sub_beat_times[i]), best_score))
+
+    timeline = []
+    if raw:
+        current_chord, current_start, _ = raw[0]
+        for chord, t, conf in raw[1:]:
+            if chord != current_chord:
+                if current_chord != "--":
+                    timeline.append({
+                        "start": round(current_start, 3),
+                        "end":   round(t, 3),
+                        "chord": current_chord
+                    })
+                current_chord, current_start = chord, t
+        if current_chord != "--":
+            timeline.append({
+                "start": round(current_start, 3),
+                "end":   round(song_duration, 3),
+                "chord": current_chord
+            })
+
+    if TRANSFORMER_MODEL is not None and timeline:
+        snapped = []
+        for seg in timeline:
+            s = nearest_beat(seg["start"])
+            e = nearest_beat(seg["end"])
+            if e > s:
+                snapped.append({"start": round(s, 3), "end": round(e, 3), "chord": seg["chord"]})
+        timeline = snapped
+
+    timeline = [s for s in timeline if (s["end"] - s["start"]) >= MIN_SEG]
+
+    merged = []
+    for seg in timeline:
+        if merged and merged[-1]["chord"] == seg["chord"]:
+            merged[-1]["end"] = seg["end"]
+        else:
+            merged.append(seg)
+    timeline = merged
+
+    return timeline
+
+
+async def _build_song_response(filename: str):
+    """Run extraction on a static-served file and assemble the JSON response."""
+    loop = asyncio.get_running_loop()
+    try:
+        timeline = await loop.run_in_executor(
+            None, extract_chords_from_file, f"static/{filename}"
+        )
+    except Exception as e:
+        print(f"Chroma extraction error: {e}")
+        raise HTTPException(status_code=500, detail="Chord extraction failed.")
+
+    chord_dur = {}
+    for seg in timeline:
+        c = seg['chord']
+        if c != '--':
+            chord_dur[c] = chord_dur.get(c, 0) + (seg['end'] - seg['start'])
+    total_dur = sum(chord_dur.values()) or 1.0
+    main_chords = [
+        c for c, d in sorted(chord_dur.items(), key=lambda x: -x[1])
+        if d / total_dur >= 0.04
+    ][:8]
+
+    return {"audio_url": f"/static/{filename}", "timeline": timeline, "main_chords": main_chords}
+
+
 @app.post("/api/search")
 async def search_song(request: SearchQuery):
     loop = asyncio.get_running_loop()
@@ -403,8 +566,6 @@ async def search_song(request: SearchQuery):
         filename = await loop.run_in_executor(None, download_audio, _q, _vid)
     except Exception as exc:
         detail = str(exc)
-        # Final safety net — never leak YouTube/yt-dlp internals to end users.
-        # Any download-side error gets sanitised to a friendly message.
         leak_markers = [
             'sign in', 'confirm you', 'not a bot',
             '[youtube]', 'yt-dlp', 'cookies', 'extractor',
@@ -418,192 +579,55 @@ async def search_song(request: SearchQuery):
     if not filename:
         raise HTTPException(status_code=400, detail="Couldn't fetch this song. Please try another.")
 
-    def extract_chords_from_file(filepath):
-        """
-        Chord extraction pipeline for a full song.
-        Uses Transformer model if trained; falls back to Chroma templates.
-        Both paths apply HPSS + CQT for consistent preprocessing.
-        """
-        # Cap analysis length on low-CPU hosts to keep response times reasonable.
-        # HF Spaces cpu-basic is ~4x slower than typical laptops; 3.5 min is enough
-        # for most songs to show their full chord progression.
-        MAX_ANALYSIS_SEC = 210
-        y, sr = librosa.load(filepath, sr=SR, duration=MAX_ANALYSIS_SEC)
-        song_duration = float(len(y)) / SR
+    return await _build_song_response(filename)
 
-        # Harmonic-Percussive separation — lower margin is ~3x faster with
-        # minimal impact on chord detection quality.
-        y_harmonic = librosa.effects.harmonic(y, margin=3)
 
-        # Chroma CQT with finer hop for better temporal resolution
-        FINE_HOP = HOP_LENGTH // 2          # 256 samples ≈ 11.6 ms/frame
-        chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=SR, hop_length=FINE_HOP)
-        chroma_T = chroma.T   # (T, 12)
-        T = chroma_T.shape[0]
+@app.post("/api/upload")
+async def upload_song(file: UploadFile = File(...)):
+    """
+    Accept an MP3/WAV/M4A/etc upload, save (and convert to wav), then run
+    the same chord-extraction pipeline as /api/search.
+    """
+    import shutil, subprocess, uuid as _uuid
+    os.makedirs("static", exist_ok=True)
 
-        # Beat tracking — base grid for sub-beat construction
-        _, beat_frames = librosa.beat.beat_track(
-            y=y_harmonic, sr=SR, hop_length=FINE_HOP, trim=False)
-        beat_frames = np.asarray(beat_frames, dtype=int)
-        beat_times  = librosa.frames_to_time(beat_frames, sr=SR, hop_length=FINE_HOP)
-        beat_times  = np.append(beat_times, song_duration)   # sentinel at end
+    # Clean up old downloads same way as YouTube path
+    for f in glob.glob("static/downloaded_*.wav"):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
 
-        # Estimate BPM for adaptive parameters
-        tempo_bpm = (60.0 / float(np.median(np.diff(beat_times[:-1])))
-                     if len(beat_times) > 2 else 100.0)
-        print(f"[Beat] tempo={tempo_bpm:.1f} BPM, {len(beat_frames)} beats detected")
+    src_ext = os.path.splitext(file.filename or "upload")[1].lower() or ".bin"
+    uid = _uuid.uuid4().hex[:12]
+    raw_path = f"static/upload_{uid}{src_ext}"
+    wav_path = f"static/downloaded_{uid}.wav"
 
-        # Build 8th-note sub-beat grid: interpolate midpoints between every pair of beats.
-        # This doubles temporal resolution — catches chord changes that fall on 8th-note
-        # positions in 6/8, 3/4, or any song with half-bar chord changes.
-        sub_times = []
-        for i in range(len(beat_times) - 1):
-            sub_times.append(float(beat_times[i]))
-            sub_times.append((float(beat_times[i]) + float(beat_times[i + 1])) / 2.0)
-        sub_times.append(float(beat_times[-1]))
-        sub_beat_times = np.array(sub_times)
+    # Stream the upload to disk
+    with open(raw_path, "wb") as out:
+        shutil.copyfileobj(file.file, out)
 
-        # Snap tolerance: 55% of a sub-beat interval (half an 8th note)
-        median_sub = float(np.median(np.diff(sub_beat_times))) if len(sub_beat_times) > 2 else 0.25
-        max_snap   = median_sub * 0.55
-
-        def nearest_beat(t):
-            deltas = np.abs(sub_beat_times - t)
-            idx    = int(np.argmin(deltas))
-            return float(sub_beat_times[idx]) if deltas[idx] <= max_snap else float(t)
-
-        # Adaptive minimum segment duration based on estimated BPM.
-        # At high BPM a chord every 2 beats can be < 0.8 s — keep it.
-        if   tempo_bpm > 160: MIN_SEG = 0.25
-        elif tempo_bpm > 120: MIN_SEG = 0.40
-        elif tempo_bpm >  90: MIN_SEG = 0.60
-        else:                 MIN_SEG = 0.80
-        print(f"[Beat] MIN_SEG={MIN_SEG:.2f}s")
-
-        # Frames per model window — SEQUENCE_LENGTH=200 at FINE_HOP=256 ≈ 2.32 s
-        WIN_FRAMES = SEQUENCE_LENGTH           # 200 frames
-        STRIDE     = WIN_FRAMES // 2           # 100-frame stride → 50% overlap
-        secs_per_frame = FINE_HOP / SR         # ~11.6 ms
-
-        if TRANSFORMER_MODEL is not None:
-            # ── TRANSFORMER PATH (overlapping windows) ──────────────────
-            starts = list(range(0, T - WIN_FRAMES + 1, STRIDE))
-            if not starts:
-                return []
-
-            windows = np.array(
-                [chroma_T[s : s + WIN_FRAMES] for s in starts],
-                dtype=np.float32
-            )   # (N, 200, 12)
-
-            probs        = TRANSFORMER_MODEL.predict(windows, verbose=0, batch_size=32)
-            pred_classes = np.argmax(probs, axis=1)
-            pred_confs   = np.max(probs, axis=1)
-
-            raw = [
-                (CHORD_CLASSES[pred_classes[i]],
-                 starts[i] * secs_per_frame,
-                 float(pred_confs[i]))
-                for i in range(len(starts))
-            ]
-        else:
-            # ── CHROMA TEMPLATE FALLBACK (sub-beat-synchronous classification) ──
-            # Build frame indices for sub-beat times (excluding the sentinel).
-            # clip to [0, T-1] so no out-of-bounds frames reach librosa.util.sync.
-            sub_beat_frames = np.clip(
-                np.round(sub_beat_times[:-1] * SR / FINE_HOP).astype(int), 0, T - 1
-            )
-            beat_chroma   = librosa.util.sync(chroma, sub_beat_frames, aggregate=np.median)
-            # beat_chroma shape: (12, num_sub_beats)
-            beat_chroma_T = beat_chroma.T   # (num_sub_beats, 12)
-            num_sub_beats = beat_chroma_T.shape[0]
-            raw = []
-            for i in range(num_sub_beats):
-                # 3-sub-beat context window centred on current position
-                win = beat_chroma_T[max(0, i - 1) : min(num_sub_beats, i + 2)]
-                vec = np.median(win, axis=0)
-                # Suppress weak tones (< 38% of peak)
-                peak = np.max(vec)
-                if peak <= 0:
-                    continue
-                vec = np.where(vec > 0.38 * peak, vec, 0)
-                norm = np.linalg.norm(vec)
-                if norm == 0:
-                    continue
-                vec = vec / norm
-                best_chord, best_score = "--", 0.0
-                for name, template in CHORD_TEMPLATES.items():
-                    score = float(np.dot(vec, template))
-                    if score > best_score:
-                        best_score = score
-                        best_chord = name
-                if best_score >= 0.65:
-                    raw.append((best_chord, float(sub_beat_times[i]), best_score))
-
-        # ── TEMPORAL SMOOTHING: merge consecutive identical chords ──────
-        timeline = []
-        if raw:
-            current_chord, current_start, _ = raw[0]
-            for chord, t, conf in raw[1:]:
-                if chord != current_chord:
-                    if current_chord != "--":
-                        timeline.append({
-                            "start": round(current_start, 3),
-                            "end":   round(t, 3),
-                            "chord": current_chord
-                        })
-                    current_chord, current_start = chord, t
-            if current_chord != "--":
-                timeline.append({
-                    "start": round(current_start, 3),
-                    "end":   round(song_duration, 3),
-                    "chord": current_chord
-                })
-
-        # ── BEAT-SNAP: align boundaries to beat grid (transformer path only) ──
-        if TRANSFORMER_MODEL is not None and timeline:
-            snapped = []
-            for seg in timeline:
-                s = nearest_beat(seg["start"])
-                e = nearest_beat(seg["end"])
-                if e > s:
-                    snapped.append({"start": round(s, 3), "end": round(e, 3), "chord": seg["chord"]})
-            timeline = snapped
-
-        # ── SEGMENT FILTERING ────────────────────────────────────────────
-        # Remove segments shorter than MIN_SEG (adaptive to tempo)
-        timeline = [s for s in timeline if (s["end"] - s["start"]) >= MIN_SEG]
-
-        # Re-merge any adjacent identical chords exposed after filtering
-        merged = []
-        for seg in timeline:
-            if merged and merged[-1]["chord"] == seg["chord"]:
-                merged[-1]["end"] = seg["end"]
-            else:
-                merged.append(seg)
-        timeline = merged
-
-        return timeline
+    # Convert to 22050 Hz mono wav (the format librosa.load expects)
+    ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+    try:
+        subprocess.run(
+            [ffmpeg_path, "-y", "-i", raw_path, "-ar", str(SR), "-ac", "1", wav_path],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        try: os.remove(raw_path)
+        except OSError: pass
+        raise HTTPException(
+            status_code=400,
+            detail="Couldn't read that audio file. Try MP3, WAV, or M4A."
+        )
 
     try:
-        timeline = await loop.run_in_executor(None, extract_chords_from_file, f"static/{filename}")
-    except Exception as e:
-        print(f"Chroma extraction error: {e}")
-        raise HTTPException(status_code=500, detail="Chord extraction failed.")
+        os.remove(raw_path)
+    except OSError:
+        pass
 
-    # Compute main chords: rank by total duration, keep those >= 4% of chord time
-    chord_dur = {}
-    for seg in timeline:
-        c = seg['chord']
-        if c != '--':
-            chord_dur[c] = chord_dur.get(c, 0) + (seg['end'] - seg['start'])
-    total_dur = sum(chord_dur.values()) or 1.0
-    main_chords = [
-        c for c, d in sorted(chord_dur.items(), key=lambda x: -x[1])
-        if d / total_dur >= 0.04
-    ][:8]
-
-    return {"audio_url": f"/static/{filename}", "timeline": timeline, "main_chords": main_chords}
+    return await _build_song_response(os.path.basename(wav_path))
 
 def _ytmusic_search_with_retry(query, limit=8, attempts=3):
     """ytmusicapi over HF cloud often hits SSL EOF — retry with backoff."""

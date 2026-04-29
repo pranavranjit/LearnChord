@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="static/styles.css?v=7">
+    <link rel="stylesheet" href="static/styles.css?v=8">
 </head>
 <body>
     <!-- Background blobs hidden in new theme via CSS -->
@@ -46,6 +46,11 @@
                     <ul id="autocomplete-list" class="autocomplete-items hidden"></ul>
                 </div>
                 <button id="search-btn" class="btn action">Search</button>
+            </div>
+            <div class="upload-row">
+                <span class="upload-divider">or upload your own song</span>
+                <label for="file-input" class="btn secondary upload-btn">📁 Upload (MP3/WAV/M4A)</label>
+                <input type="file" id="file-input" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" hidden />
             </div>
             <div id="loading-container" class="hidden">
                 <div class="spinner"></div>
@@ -116,6 +121,6 @@
         </section>
     </div>
 
-    <script src="static/script.js?v=7"></script>
+    <script src="static/script.js?v=8"></script>
 </body>
 </html>

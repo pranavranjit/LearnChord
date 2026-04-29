@@ -30,6 +30,7 @@ const practiceBtn      = document.getElementById('practice-btn');
 const newSearchBtn     = document.getElementById('new-search-btn');
 const resultsSection   = document.getElementById('results-section');
 const resultsList      = document.getElementById('results-list');
+const fileInput        = document.getElementById('file-input');
 
 const timelineTrack    = document.getElementById('timeline-track');
 const playhead         = document.getElementById('playhead');
@@ -321,6 +322,32 @@ searchBtn.addEventListener('click', async () => {
 });
 
 // ── Step 2: user picks a song → download + extract ────────────────────────────
+function handleSongResponse(data) {
+    chordTimeline   = data.timeline;
+    audioPlayer.src = data.audio_url + "?t=" + Date.now();
+
+    const mainChords = data.main_chords || [];
+    chordGrid.innerHTML = '';
+    mainChords.forEach(chord => {
+        const pill = document.createElement('div');
+        pill.className = 'chord-pill selectable';
+        pill.textContent = chord;
+        pill.title = 'Click to set as practice target';
+        pill.addEventListener('click', () => {
+            targetChord = chord;
+            if (targetChordEl) targetChordEl.textContent = chord;
+            chordGrid.querySelectorAll('.chord-pill').forEach(p => p.classList.remove('selected'));
+            pill.classList.add('selected');
+            checkMatch();
+        });
+        chordGrid.appendChild(pill);
+    });
+
+    searchSection.classList.add('hidden');
+    resultsSection.classList.add('hidden');
+    overviewSection.classList.remove('hidden');
+}
+
 async function extractChords(videoId, query) {
     resultsSection.classList.add('hidden');
     loadingContainer.classList.remove('hidden');
@@ -340,29 +367,7 @@ async function extractChords(videoId, query) {
             const errData = await response.json().catch(() => ({}));
             throw new Error(errData.detail || `Server error ${response.status}`);
         }
-        const data = await response.json();
-        chordTimeline   = data.timeline;
-        audioPlayer.src = data.audio_url + "?t=" + Date.now();
-
-        const mainChords = data.main_chords || [];
-        chordGrid.innerHTML = '';
-        mainChords.forEach(chord => {
-            const pill = document.createElement('div');
-            pill.className = 'chord-pill selectable';
-            pill.textContent = chord;
-            pill.title = 'Click to set as practice target';
-            pill.addEventListener('click', () => {
-                targetChord = chord;
-                if (targetChordEl) targetChordEl.textContent = chord;
-                chordGrid.querySelectorAll('.chord-pill').forEach(p => p.classList.remove('selected'));
-                pill.classList.add('selected');
-                checkMatch();
-            });
-            chordGrid.appendChild(pill);
-        });
-
-        searchSection.classList.add('hidden');
-        overviewSection.classList.remove('hidden');
+        handleSongResponse(await response.json());
     } catch (err) {
         alert('Error: ' + err.message);
         resultsSection.classList.remove('hidden');
@@ -370,6 +375,39 @@ async function extractChords(videoId, query) {
         stopLoadingCycle();
         loadingContainer.classList.add('hidden');
     }
+}
+
+// ── File upload (alternative to YouTube search) ───────────────────────────────
+if (fileInput) {
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        loadingContainer.classList.remove('hidden');
+        if (loadingText) loadingText.textContent = 'Uploading & analyzing your song…';
+        startLoadingCycle();
+        audioPlayer.pause();
+        audioPlayer.removeAttribute('src');
+        audioPlayer.load();
+        chordTimeline = [];
+
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            const res = await fetch('/api/upload', { method: 'POST', body: fd });
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.detail || `Server error ${res.status}`);
+            }
+            handleSongResponse(await res.json());
+        } catch (err) {
+            alert('Upload failed: ' + err.message);
+        } finally {
+            stopLoadingCycle();
+            loadingContainer.classList.add('hidden');
+            fileInput.value = '';
+        }
+    });
 }
 
 // ── Timeline Rendering ────────────────────────────────────────────────────────
