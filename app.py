@@ -20,9 +20,6 @@ from transformer_model import (
 
 ytmusic = ytmusicapi.YTMusic()
 
-# ==========================================
-# Load Transformer Model (if trained)
-# ==========================================
 MODEL_PATH = "transformer_chord_model.keras"
 TRANSFORMER_MODEL = None
 _MODEL_LOADED = False
@@ -51,57 +48,40 @@ class SearchQuery(BaseModel):
     query: str
     video_id: Optional[str] = None
 
-# ==========================================
-# Audio Config
-# ==========================================
 SR = 22050
 DURATION = 1.0
 CHUNK_SAMPLES = int(SR * DURATION)
 HOP_LENGTH = 512
 VOLUME_THRESHOLD = 0.001
 
-# ==========================================
-# Guitar-aware Chord Templates
-# ==========================================
-# Weights approximate typical guitar voicings:
-#   - Root heavier (often doubled: bass string + octave on higher strings)
-#   - 3rd slightly lighter (sometimes omitted or sounded weaker)
-#   - 5th standard (doubled in barre chords)
-# Power / sus chords included because guitarists play them constantly
-# and they currently get mis-labelled as maj/min.
 PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 def create_chord_templates():
     templates = {}
     for i, root in enumerate(PITCH_CLASSES):
-        # Major triad (guitar-weighted)
         maj = np.zeros(12)
         maj[i]            = 1.3
         maj[(i + 4) % 12] = 0.9
         maj[(i + 7) % 12] = 1.0
         templates[f"{root}"] = maj / np.linalg.norm(maj)
 
-        # Minor triad
         minor = np.zeros(12)
         minor[i]            = 1.3
         minor[(i + 3) % 12] = 0.9
         minor[(i + 7) % 12] = 1.0
         templates[f"{root}m"] = minor / np.linalg.norm(minor)
 
-        # Power chord (root + 5th, no 3rd) — rock/punk/metal staple
         power = np.zeros(12)
         power[i]            = 1.4
         power[(i + 7) % 12] = 1.0
         templates[f"{root}5"] = power / np.linalg.norm(power)
 
-        # sus2 (root + 2nd + 5th)
         sus2 = np.zeros(12)
         sus2[i]            = 1.2
         sus2[(i + 2) % 12] = 0.9
         sus2[(i + 7) % 12] = 1.0
         templates[f"{root}sus2"] = sus2 / np.linalg.norm(sus2)
 
-        # sus4 (root + 4th + 5th)
         sus4 = np.zeros(12)
         sus4[i]            = 1.2
         sus4[(i + 5) % 12] = 0.9
@@ -112,10 +92,6 @@ def create_chord_templates():
 print("Initializing Chroma Chord Templates...")
 CHORD_TEMPLATES = create_chord_templates()
 
-# ==========================================
-# Audio Processing — unified feature pipeline
-# Mic path now matches offline extraction: HPSS + chroma_cqt.
-# ==========================================
 def process_audio_chunk(audio_data):
     if audio_data.ndim > 1:
         audio_data = audio_data[:, 0]
@@ -124,8 +100,6 @@ def process_audio_chunk(audio_data):
     if rms < VOLUME_THRESHOLD:
         return {"chord": "--", "confidence": 0.0, "volume": float(rms)}
 
-    # Harmonic-percussive separation strips pick/strum transients before analysis.
-    # margin=3 matches extract_chords_from_file() for consistency.
     try:
         y_h = librosa.effects.harmonic(audio_data, margin=3)
     except Exception:
@@ -148,15 +122,7 @@ def process_audio_chunk(audio_data):
 
     return {"chord": best_chord, "confidence": float(best_score), "volume": float(rms)}
 
-# ==========================================
-# YouTube Audio Downloader (yt-dlp)
-# ==========================================
 def _ytmusic_url(query):
-    """
-    Use ytmusicapi to find the best matching song on YouTube Music.
-    Returns a youtube.com watch URL, or None if nothing found.
-    Retries on SSL/network errors; falls through to yt-dlp's caller search if it fails.
-    """
     import time as _time
     for filter_type in ('songs', 'videos'):
         for attempt in range(3):
@@ -170,9 +136,9 @@ def _ytmusic_url(query):
                         artists = r.get('artists', [])
                         if artists:
                             artist = artists[0].get('name', '')
-                        print(f"[YTMusic] Found ({filter_type}): {artist} — {title}  [{vid}]")
+                        print(f"[YTMusic] Found ({filter_type}): {artist} - {title}  [{vid}]")
                         return f"https://www.youtube.com/watch?v={vid}"
-                break  # got results but no videoIds — try next filter
+                break
             except Exception as e:
                 print(f"[YTMusic] {filter_type} attempt {attempt+1}/3: {e}")
                 _time.sleep(0.5 * (attempt + 1))
@@ -184,10 +150,7 @@ def download_audio(query, video_id=None):
     print(f"\nSearching YouTube Music for: '{query}'...")
     os.makedirs("static", exist_ok=True)
 
-    # Use a UUID so filenames are always unique — avoids Windows file-lock
-    # collisions when the browser is still holding the previous .wav open.
-    # Old files are cleaned up here on a best-effort basis; failures are
-    # ignored because Windows won't release a lock until the browser unloads.
+    # UUID filenames avoid Windows file-lock collisions when browser still holds previous .wav
     for f in glob.glob("static/downloaded_*.wav"):
         try:
             os.remove(f)
@@ -197,19 +160,15 @@ def download_audio(query, video_id=None):
 
     out_base = f"static/downloaded_{_uuid.uuid4().hex[:12]}"
 
-    # If a specific video ID was chosen by the user, use it directly;
-    # otherwise resolve via YouTube Music search, then fall back to generic search
     if video_id:
         url = f"https://www.youtube.com/watch?v={video_id}"
     else:
         url = _ytmusic_url(query) or f"ytsearch1:{query}"
     print(f"[Download] URL: {url}")
 
-    # Use system ffmpeg in Docker (apt-installed), fall back to imageio bundle locally
     import shutil, subprocess
     ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
 
-    # Optional cookies file (HF admin can set YT_COOKIES_FILE in Space secrets)
     cookies_file = os.environ.get("YT_COOKIES_FILE")
     if cookies_file and not os.path.exists(cookies_file):
         cookies_file = None
@@ -217,7 +176,6 @@ def download_audio(query, video_id=None):
     success = False
     title = "Unknown"
 
-    # ── Strategy 1: yt-dlp with rotating player clients ─────────────────
     client_order = [
         ['tv_simply'], ['mediaconnect'], ['mweb'], ['ios'], ['tv'], ['web'],
     ]
@@ -271,15 +229,12 @@ def download_audio(query, video_id=None):
             print(f"[Download] {client[0]} failed (non-transient): {e}")
             break
 
-    # ── Strategy 2: pytubefix fallback (different YouTube API path) ─────
     if not success:
         print("[Download] yt-dlp exhausted, trying pytubefix...")
         try:
             from pytubefix import YouTube
-            # Resolve URL → video id; pytubefix needs a watch URL
             target_url = url if url.startswith('http') else None
             if not target_url:
-                # url was an ytsearch query — need to extract via yt-dlp's search
                 with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
                     s = ydl.extract_info(url, download=False)
                     if s and s.get('entries'):
@@ -308,7 +263,6 @@ def download_audio(query, video_id=None):
             print(f"[Download] pytubefix failed: {e}")
 
     if not success:
-        # Friendly message for end users — no implementation details
         raise RuntimeError(
             "Couldn't fetch this song right now. "
             "YouTube is rate-limiting our server — please try a different song or try again in a moment."
@@ -321,21 +275,11 @@ def download_audio(query, video_id=None):
 
     return os.path.basename(downloaded[0])
 
-# ==========================================
-# FastAPI Server
-# ==========================================
 app = FastAPI()
 active_connections: List[WebSocket] = []
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    Browser-based mic detection.
-    The client sends:
-      - text '{"command":"START"}' / '{"command":"STOP"}' to toggle listening
-      - binary frames of float32 PCM audio captured via getUserMedia
-    The server processes each chunk and replies with JSON chord detection results.
-    """
     await websocket.accept()
     active_connections.append(websocket)
     audio_buffer = np.zeros(CHUNK_SAMPLES, dtype=np.float32)
@@ -347,7 +291,6 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             msg = await websocket.receive()
 
-            # Text message: START / STOP toggle
             if "text" in msg:
                 data = msg["text"]
                 if "START" in data:
@@ -361,13 +304,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     print("Listening stopped.")
                 continue
 
-            # Binary message: raw float32 PCM from browser mic
             if "bytes" in msg and is_listening:
                 pcm = np.frombuffer(msg["bytes"], dtype=np.float32)
                 if len(pcm) == 0:
                     continue
 
-                # Rolling buffer — append new audio, shift old out
                 new_len = min(len(pcm), CHUNK_SAMPLES)
                 audio_buffer[:] = np.roll(audio_buffer, -new_len)
                 audio_buffer[-new_len:] = pcm[-new_len:]
@@ -392,15 +333,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ==========================================
-# REST API Endpoints
-# ==========================================
 def extract_chords_from_file(filepath):
-    """
-    Chord extraction pipeline for a full song.
-    Uses Transformer model if trained; falls back to Chroma templates.
-    Both paths apply HPSS + CQT for consistent preprocessing.
-    """
     MAX_ANALYSIS_SEC = 210
     y, sr = librosa.load(filepath, sr=SR, duration=MAX_ANALYSIS_SEC)
     song_duration = float(len(y)) / SR
@@ -534,7 +467,6 @@ def extract_chords_from_file(filepath):
 
 
 async def _build_song_response(filename: str):
-    """Run extraction on a static-served file and assemble the JSON response."""
     loop = asyncio.get_running_loop()
     try:
         timeline = await loop.run_in_executor(
@@ -584,14 +516,9 @@ async def search_song(request: SearchQuery):
 
 @app.post("/api/upload")
 async def upload_song(file: UploadFile = File(...)):
-    """
-    Accept an MP3/WAV/M4A/etc upload, save (and convert to wav), then run
-    the same chord-extraction pipeline as /api/search.
-    """
     import shutil, subprocess, uuid as _uuid
     os.makedirs("static", exist_ok=True)
 
-    # Clean up old downloads same way as YouTube path
     for f in glob.glob("static/downloaded_*.wav"):
         try:
             os.remove(f)
@@ -603,11 +530,9 @@ async def upload_song(file: UploadFile = File(...)):
     raw_path = f"static/upload_{uid}{src_ext}"
     wav_path = f"static/downloaded_{uid}.wav"
 
-    # Stream the upload to disk
     with open(raw_path, "wb") as out:
         shutil.copyfileobj(file.file, out)
 
-    # Convert to 22050 Hz mono wav (the format librosa.load expects)
     ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
     try:
         subprocess.run(
@@ -630,7 +555,6 @@ async def upload_song(file: UploadFile = File(...)):
     return await _build_song_response(os.path.basename(wav_path))
 
 def _ytmusic_search_with_retry(query, limit=8, attempts=3):
-    """ytmusicapi over HF cloud often hits SSL EOF — retry with backoff."""
     import time as _time
     last_err = None
     for i in range(attempts):
@@ -644,7 +568,6 @@ def _ytmusic_search_with_retry(query, limit=8, attempts=3):
 
 
 def _ytdlp_search_fallback(query, limit=8):
-    """Fallback search using yt-dlp's flat extraction when ytmusicapi is down."""
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
@@ -712,7 +635,6 @@ async def suggest_songs(q: str = ""):
         except Exception as e:
             print(f"[Suggest] ytmusic failed: {e}; falling back to yt-dlp search")
 
-        # Fallback: yt-dlp's ytsearch
         try:
             return _ytdlp_search_fallback(q, limit=8)
         except Exception as e:
@@ -728,7 +650,6 @@ async def autocomplete(q: str = ""):
     loop = asyncio.get_running_loop()
 
     def _suggest():
-        # ytmusicapi sometimes drops SSL on HF cloud — retry once, fail silently.
         import time as _time
         for attempt in range(2):
             try:
@@ -737,7 +658,6 @@ async def autocomplete(q: str = ""):
                 if attempt == 0:
                     _time.sleep(0.4)
                     continue
-                # Final attempt failed — log once at debug level, return empty.
                 print(f"[Autocomplete] suggestion fetch failed: {type(e).__name__}")
                 return []
         return []

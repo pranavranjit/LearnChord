@@ -10,7 +10,6 @@
     <link rel="stylesheet" href="static/styles.css?v=8">
 </head>
 <body>
-    <!-- Background blobs hidden in new theme via CSS -->
     <div class="background-elements">
         <div class="blob top-left"></div>
         <div class="blob bottom-right"></div>
@@ -23,7 +22,6 @@
                 <span class="subtitle">Search · Extract · Practice</span>
             </div>
             <div class="header-controls">
-                <!-- Equalizer animation (activated by JS when mic is listening) -->
                 <div class="eq-icon" id="eq-icon">
                     <div class="eq-bar"></div>
                     <div class="eq-bar"></div>
@@ -38,7 +36,6 @@
             </div>
         </header>
 
-        <!-- Search -->
         <section class="search-panel glass-panel" id="search-section">
             <div class="search-bar">
                 <div class="autocomplete-wrapper">
@@ -58,13 +55,11 @@
             </div>
         </section>
 
-        <!-- Song Results -->
         <section class="results-panel glass-panel hidden" id="results-section">
             <h2>Select a Song</h2>
             <ul id="results-list" class="results-list"></ul>
         </section>
 
-        <!-- Overview: main chords -->
         <section class="overview-panel glass-panel hidden" id="overview-section">
             <h2>Chord Patterns</h2>
             <p class="subtitle">Main chords sorted by how often they appear.<br>Select one to set as your practice target.</p>
@@ -75,7 +70,6 @@
             </div>
         </section>
 
-        <!-- Interactive Timeline Player -->
         <section class="timeline-section glass-panel hidden" id="timeline-section">
             <div class="timeline-header">
                 <div class="now-playing">
@@ -95,7 +89,6 @@
 
             <audio id="audio-player"></audio>
 
-            <!-- Live practice comparison -->
             <div class="practice-row">
                 <div class="practice-box" id="player-box">
                     <h4>You Play</h4>

@@ -1,4 +1,3 @@
-// ── Chord colour map (one RGB per root, matches new Spotify-palette theme) ──
 const CHORD_COLORS = {
     'C':  '229,57,53',   'C#': '237,85,59',
     'D':  '245,124,0',   'D#': '249,168,37',
@@ -8,7 +7,6 @@ const CHORD_COLORS = {
     'A#': '94,53,177',   'B':  '216,27,96',
 };
 
-// ── DOM references ────────────────────────────────────────────────────────────
 const connectionStatus = document.getElementById('connection-status');
 const statusIndicator  = document.querySelector('.status-indicator');
 const micToggleBtn     = document.getElementById('mic-toggle');
@@ -56,12 +54,10 @@ let currentChord  = "--";
 let targetChord   = "--";
 let animFrame     = null;
 
-// ── Browser microphone state ──────────────────────────────────────────────────
-let micStream    = null;   // MediaStream from getUserMedia
-let audioCtx     = null;   // AudioContext for mic processing
-let micProcessor = null;   // ScriptProcessorNode that sends PCM to server
+let micStream    = null;
+let audioCtx     = null;
+let micProcessor = null;
 
-// ── Equalizer helpers ─────────────────────────────────────────────────────────
 function setEqActive(active) {
     if (!eqIcon) return;
     eqIcon.classList.toggle('active', active);
@@ -76,7 +72,6 @@ function driveEq(normVolume) {
     });
 }
 
-// ── Browser mic capture ───────────────────────────────────────────────────────
 async function startMicCapture() {
     try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -88,16 +83,15 @@ async function startMicCapture() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
     const source = audioCtx.createMediaStreamSource(micStream);
 
-    // 4096-sample buffer ≈ 186 ms at 22050 Hz — good balance of latency vs overhead
     micProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
     micProcessor.onaudioprocess = (e) => {
         if (!isListening || !ws || ws.readyState !== WebSocket.OPEN) return;
-        const pcm = e.inputBuffer.getChannelData(0);  // Float32Array
-        ws.send(pcm.buffer);  // send raw float32 PCM as binary
+        const pcm = e.inputBuffer.getChannelData(0);
+        ws.send(pcm.buffer);
     };
 
     source.connect(micProcessor);
-    micProcessor.connect(audioCtx.destination);  // required for ScriptProcessor to fire
+    micProcessor.connect(audioCtx.destination);
     return true;
 }
 
@@ -107,7 +101,6 @@ function stopMicCapture() {
     if (micStream)    { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────────
 function connect() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${window.location.host}/ws`);
@@ -165,13 +158,11 @@ micToggleBtn.addEventListener('click', async () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     if (!isListening) {
-        // Start: request mic permission and begin capture
         const ok = await startMicCapture();
         if (!ok) return;
         isListening = true;
         ws.send(JSON.stringify({ command: "START" }));
     } else {
-        // Stop: tear down mic capture
         isListening = false;
         ws.send(JSON.stringify({ command: "STOP" }));
         stopMicCapture();
@@ -196,7 +187,6 @@ micToggleBtn.addEventListener('click', async () => {
     }
 });
 
-// ── Autocomplete ──────────────────────────────────────────────────────────────
 let debounceTimer;
 songInput.addEventListener('input', (e) => {
     clearTimeout(debounceTimer);
@@ -228,7 +218,6 @@ document.addEventListener('click', (e) => {
     if (!e.target.closest('.autocomplete-wrapper')) autocompleteList.classList.add('hidden');
 });
 
-// ── Search & Extract ──────────────────────────────────────────────────────────
 const LOADING_MESSAGES = [
     'Downloading audio…',
     'Separating harmonics…',
@@ -254,7 +243,6 @@ function stopLoadingCycle() {
     loadingInterval = null;
 }
 
-// ── Step 1: search → show song list ───────────────────────────────────────────
 searchBtn.addEventListener('click', async () => {
     const query = songInput.value.trim();
     if (!query) return;
@@ -321,7 +309,6 @@ searchBtn.addEventListener('click', async () => {
     }
 });
 
-// ── Step 2: user picks a song → download + extract ────────────────────────────
 function handleSongResponse(data) {
     chordTimeline   = data.timeline;
     audioPlayer.src = data.audio_url + "?t=" + Date.now();
@@ -377,7 +364,6 @@ async function extractChords(videoId, query) {
     }
 }
 
-// ── File upload (alternative to YouTube search) ───────────────────────────────
 if (fileInput) {
     fileInput.addEventListener('change', async (e) => {
         const file = e.target.files && e.target.files[0];
@@ -410,11 +396,8 @@ if (fileInput) {
     });
 }
 
-// ── Timeline Rendering ────────────────────────────────────────────────────────
-// Extract root from any chord name (C, Cm, C5, Csus2, Csus4, F#m, etc.)
 function chordRoot(chordName) {
     if (!chordName) return '';
-    // Handle sharp roots (2-char) first, then naturals
     if (chordName.length >= 2 && chordName[1] === '#') return chordName.slice(0, 2);
     return chordName.slice(0, 1);
 }
@@ -447,7 +430,6 @@ function renderTimeline() {
     });
 }
 
-// ── Playhead & Sync Loop ──────────────────────────────────────────────────────
 function updatePlayhead() {
     if (songDuration > 0) {
         const pct = (audioPlayer.currentTime / songDuration) * 100;
@@ -494,7 +476,6 @@ timelineTrack.addEventListener('click', (e) => {
     if (songDuration > 0) audioPlayer.currentTime = pct * songDuration;
 });
 
-// ── Practice Flow ─────────────────────────────────────────────────────────────
 practiceBtn.addEventListener('click', () => {
     overviewSection.classList.add('hidden');
     timelineSection.classList.remove('hidden');
@@ -524,7 +505,6 @@ newSearchBtn.addEventListener('click', () => {
     searchSection.classList.remove('hidden');
     micToggleBtn.classList.add('hidden');
 
-    // Stop mic if active
     if (isListening && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ command: "STOP" }));
     }
@@ -535,7 +515,6 @@ newSearchBtn.addEventListener('click', () => {
     micToggleBtn.textContent = "Start Listening";
     micToggleBtn.className   = "btn primary";
 
-    // Release audio file so server can delete it on next search
     audioPlayer.pause();
     audioPlayer.removeAttribute('src');
     audioPlayer.load();
@@ -550,6 +529,5 @@ backToOverviewBtn.addEventListener('click', () => {
     audioPlayer.pause();
 });
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 micToggleBtn.disabled = true;
 connect();
