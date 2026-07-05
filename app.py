@@ -3,7 +3,7 @@ import os
 import glob
 import numpy as np
 import librosa
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -222,6 +222,7 @@ def download_audio(query, video_id=None):
                 or 'ssl' in err_msg or 'eof' in err_msg
                 or 'unable to download' in err_msg or 'http error' in err_msg
                 or 'timeout' in err_msg or 'connection' in err_msg
+                or 'format is not available' in err_msg or 'requested format' in err_msg
             )
             if transient:
                 print(f"[Download] {client[0]} transient error, trying next client…")
@@ -333,6 +334,76 @@ async def websocket_endpoint(websocket: WebSocket):
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Higher P_STAY = smoother sequence (fewer chord changes). Window step ~0.58s,
+# so 0.9 favors chords that persist for a few windows.
+P_STAY = 0.90
+
+# BETA sharpens the per-window template scores into emission probabilities before
+# Viterbi. Higher = more confident emissions (less smoothing pull from neighbors).
+EMIT_BETA = 12.0
+
+def _build_class_templates():
+    """Major/minor chord templates aligned to CHORD_CLASSES order (24 x 12)."""
+    mat = np.zeros((len(CHORD_CLASSES), 12), dtype=np.float64)
+    for k, name in enumerate(CHORD_CLASSES):
+        minor = name.endswith('m')
+        root  = name[:-1] if minor else name
+        i = PITCH_CLASSES.index(root)
+        v = np.zeros(12)
+        v[i]                                = 1.3
+        v[(i + (3 if minor else 4)) % 12]   = 0.9
+        v[(i + 7) % 12]                     = 1.0
+        mat[k] = v / np.linalg.norm(v)
+    return mat
+
+CHORD_CLASS_TEMPLATES = _build_class_templates()
+
+def template_emissions(windows):
+    """Per-window emission probabilities from chroma-template similarity.
+
+    windows: (N, WIN_FRAMES, 12) chroma. Returns (N, 24) softmaxed over chords.
+    """
+    vecs = windows.mean(axis=1)                      # (N, 12)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    vecs = vecs / np.where(norms == 0, 1.0, norms)
+    scores = vecs @ CHORD_CLASS_TEMPLATES.T          # (N, 24)
+    scores = EMIT_BETA * scores
+    scores -= scores.max(axis=1, keepdims=True)
+    exp = np.exp(scores)
+    return exp / exp.sum(axis=1, keepdims=True)
+
+def viterbi_smooth(probs, p_stay=P_STAY):
+    """First-order Markov (Viterbi) decode over per-window chord probabilities.
+
+    Replaces per-window argmax with the globally most-likely chord path, using a
+    diagonal-loaded transition matrix (self-transition p_stay, uniform otherwise).
+    Returns an array of class indices, one per window.
+    """
+    probs = np.asarray(probs, dtype=np.float64)
+    n_steps, n_states = probs.shape
+    if n_steps == 0:
+        return np.zeros(0, dtype=int)
+
+    eps = 1e-12
+    log_emit = np.log(probs + eps)
+
+    p_other = (1.0 - p_stay) / (n_states - 1)
+    log_trans = np.full((n_states, n_states), np.log(p_other))
+    np.fill_diagonal(log_trans, np.log(p_stay))
+
+    delta = log_emit[0].copy()
+    backptr = np.zeros((n_steps, n_states), dtype=int)
+    for t in range(1, n_steps):
+        scores = delta[:, None] + log_trans       # (prev, curr)
+        backptr[t] = np.argmax(scores, axis=0)
+        delta = scores[backptr[t], np.arange(n_states)] + log_emit[t]
+
+    path = np.zeros(n_steps, dtype=int)
+    path[-1] = int(np.argmax(delta))
+    for t in range(n_steps - 1, 0, -1):
+        path[t - 1] = backptr[t, path[t]]
+    return path
+
 def extract_chords_from_file(filepath):
     MAX_ANALYSIS_SEC = 210
     y, sr = librosa.load(filepath, sr=SR, duration=MAX_ANALYSIS_SEC)
@@ -380,50 +451,25 @@ def extract_chords_from_file(filepath):
     STRIDE     = WIN_FRAMES // 2
     secs_per_frame = FINE_HOP / SR
 
-    if TRANSFORMER_MODEL is not None:
-        starts = list(range(0, T - WIN_FRAMES + 1, STRIDE))
-        if not starts:
-            return []
-        windows = np.array(
-            [chroma_T[s : s + WIN_FRAMES] for s in starts],
-            dtype=np.float32
-        )
-        probs        = TRANSFORMER_MODEL.predict(windows, verbose=0, batch_size=32)
-        pred_classes = np.argmax(probs, axis=1)
-        pred_confs   = np.max(probs, axis=1)
-        raw = [
-            (CHORD_CLASSES[pred_classes[i]],
-             starts[i] * secs_per_frame,
-             float(pred_confs[i]))
-            for i in range(len(starts))
-        ]
-    else:
-        sub_beat_frames = np.clip(
-            np.round(sub_beat_times[:-1] * SR / FINE_HOP).astype(int), 0, T - 1
-        )
-        beat_chroma   = librosa.util.sync(chroma, sub_beat_frames, aggregate=np.median)
-        beat_chroma_T = beat_chroma.T
-        num_sub_beats = beat_chroma_T.shape[0]
-        raw = []
-        for i in range(num_sub_beats):
-            win = beat_chroma_T[max(0, i - 1) : min(num_sub_beats, i + 2)]
-            vec = np.median(win, axis=0)
-            peak = np.max(vec)
-            if peak <= 0:
-                continue
-            vec = np.where(vec > 0.38 * peak, vec, 0)
-            norm = np.linalg.norm(vec)
-            if norm == 0:
-                continue
-            vec = vec / norm
-            best_chord, best_score = "--", 0.0
-            for name, template in CHORD_TEMPLATES.items():
-                score = float(np.dot(vec, template))
-                if score > best_score:
-                    best_score = score
-                    best_chord = name
-            if best_score >= 0.65:
-                raw.append((best_chord, float(sub_beat_times[i]), best_score))
+    # Chroma-template emissions + Viterbi smoothing. The trained transformer was
+    # minor-biased (confidently mislabelled major chords as minor), so we decode
+    # straight from the harmonically-grounded chroma templates instead.
+    starts = list(range(0, T - WIN_FRAMES + 1, STRIDE))
+    if not starts:
+        return []
+    windows = np.array(
+        [chroma_T[s : s + WIN_FRAMES] for s in starts],
+        dtype=np.float32
+    )
+    emis         = template_emissions(windows)
+    pred_classes = viterbi_smooth(emis, P_STAY)
+    pred_confs   = emis[np.arange(len(pred_classes)), pred_classes]
+    raw = [
+        (CHORD_CLASSES[pred_classes[i]],
+         starts[i] * secs_per_frame,
+         float(pred_confs[i]))
+        for i in range(len(starts))
+    ]
 
     timeline = []
     if raw:
@@ -444,7 +490,7 @@ def extract_chords_from_file(filepath):
                 "chord": current_chord
             })
 
-    if TRANSFORMER_MODEL is not None and timeline:
+    if timeline:
         snapped = []
         for seg in timeline:
             s = nearest_beat(seg["start"])
@@ -513,46 +559,6 @@ async def search_song(request: SearchQuery):
 
     return await _build_song_response(filename)
 
-
-@app.post("/api/upload")
-async def upload_song(file: UploadFile = File(...)):
-    import shutil, subprocess, uuid as _uuid
-    os.makedirs("static", exist_ok=True)
-
-    for f in glob.glob("static/downloaded_*.wav"):
-        try:
-            os.remove(f)
-        except OSError:
-            pass
-
-    src_ext = os.path.splitext(file.filename or "upload")[1].lower() or ".bin"
-    uid = _uuid.uuid4().hex[:12]
-    raw_path = f"static/upload_{uid}{src_ext}"
-    wav_path = f"static/downloaded_{uid}.wav"
-
-    with open(raw_path, "wb") as out:
-        shutil.copyfileobj(file.file, out)
-
-    ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
-    try:
-        subprocess.run(
-            [ffmpeg_path, "-y", "-i", raw_path, "-ar", str(SR), "-ac", "1", wav_path],
-            check=True, capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        try: os.remove(raw_path)
-        except OSError: pass
-        raise HTTPException(
-            status_code=400,
-            detail="Couldn't read that audio file. Try MP3, WAV, or M4A."
-        )
-
-    try:
-        os.remove(raw_path)
-    except OSError:
-        pass
-
-    return await _build_song_response(os.path.basename(wav_path))
 
 def _ytmusic_search_with_retry(query, limit=8, attempts=3):
     import time as _time
@@ -653,14 +659,37 @@ async def autocomplete(q: str = ""):
         import time as _time
         for attempt in range(2):
             try:
-                return ytmusic.get_search_suggestions(q)
+                suggestions = ytmusic.get_search_suggestions(q)
+                if suggestions:
+                    return suggestions
+                break
             except Exception as e:
                 if attempt == 0:
                     _time.sleep(0.4)
                     continue
                 print(f"[Autocomplete] suggestion fetch failed: {type(e).__name__}")
-                return []
-        return []
+
+        # Fallback: yt-dlp flat search bypasses ytmusic entirely
+        # (ytmusic hits SSL/EOF errors on HF cloud).
+        try:
+            results = _ytdlp_search_fallback(q, limit=5)
+            seen = set()
+            out = []
+            for r in results:
+                title  = (r.get('title') or '').strip()
+                artist = (r.get('artist') or '').strip()
+                if not title:
+                    continue
+                phrase = f"{artist} {title}".strip() if artist else title
+                key = phrase.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(phrase)
+            return out
+        except Exception as e:
+            print(f"[Autocomplete] search fallback failed: {type(e).__name__}")
+            return []
 
     return await loop.run_in_executor(None, _suggest)
 

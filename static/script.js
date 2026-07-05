@@ -28,7 +28,6 @@ const practiceBtn      = document.getElementById('practice-btn');
 const newSearchBtn     = document.getElementById('new-search-btn');
 const resultsSection   = document.getElementById('results-section');
 const resultsList      = document.getElementById('results-list');
-const fileInput        = document.getElementById('file-input');
 
 const timelineTrack    = document.getElementById('timeline-track');
 const playhead         = document.getElementById('playhead');
@@ -362,38 +361,6 @@ async function extractChords(videoId, query) {
         stopLoadingCycle();
         loadingContainer.classList.add('hidden');
     }
-}
-
-if (fileInput) {
-    fileInput.addEventListener('change', async (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-
-        loadingContainer.classList.remove('hidden');
-        if (loadingText) loadingText.textContent = 'Uploading & analyzing your song…';
-        startLoadingCycle();
-        audioPlayer.pause();
-        audioPlayer.removeAttribute('src');
-        audioPlayer.load();
-        chordTimeline = [];
-
-        try {
-            const fd = new FormData();
-            fd.append('file', file);
-            const res = await fetch('/api/upload', { method: 'POST', body: fd });
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.detail || `Server error ${res.status}`);
-            }
-            handleSongResponse(await res.json());
-        } catch (err) {
-            alert('Upload failed: ' + err.message);
-        } finally {
-            stopLoadingCycle();
-            loadingContainer.classList.add('hidden');
-            fileInput.value = '';
-        }
-    });
 }
 
 function chordRoot(chordName) {
