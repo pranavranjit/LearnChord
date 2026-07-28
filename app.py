@@ -1,6 +1,10 @@
 import asyncio
 import os
 import glob
+import shutil
+import subprocess
+import threading
+import time
 import numpy as np
 import librosa
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -13,36 +17,7 @@ import yt_dlp
 import imageio_ffmpeg
 import ytmusicapi
 
-import tensorflow as tf
-from transformer_model import (
-    build_transformer, CHORD_CLASSES, SEQUENCE_LENGTH, positional_encoding
-)
-
 ytmusic = ytmusicapi.YTMusic()
-
-MODEL_PATH = "transformer_chord_model.keras"
-TRANSFORMER_MODEL = None
-_MODEL_LOADED = False
-
-def load_transformer_model():
-    global TRANSFORMER_MODEL, _MODEL_LOADED
-    if _MODEL_LOADED:
-        return
-    _MODEL_LOADED = True
-    if not os.path.exists(MODEL_PATH):
-        print("[INFO] No trained model found. Using Chroma template fallback.")
-        print("       Run: python build_dataset.py --songs 300  then  python train.py")
-        return
-    try:
-        print(f"[INFO] Loading Transformer model from {MODEL_PATH}...")
-        TRANSFORMER_MODEL = build_transformer()
-        TRANSFORMER_MODEL.load_weights(MODEL_PATH)
-        print("[INFO] Transformer model loaded successfully.")
-    except Exception as e:
-        print(f"[WARN] Could not load model: {e}. Falling back to Chroma templates.")
-        TRANSFORMER_MODEL = None
-
-load_transformer_model()
 
 class SearchQuery(BaseModel):
     query: str
@@ -55,6 +30,23 @@ HOP_LENGTH = 512
 VOLUME_THRESHOLD = 0.001
 
 PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+# 12 major then 12 minor — same order transformer_model.CHORD_NAMES uses.
+CHORD_CLASSES = PITCH_CLASSES + [p + 'm' for p in PITCH_CLASSES]
+
+# Offline analysis runs at half rate with a coarser hop than the mic path.
+# chroma_cqt tops out at C8 (4186 Hz), well under the 5512 Hz Nyquist here, and
+# 46 ms frames are still far finer than any chord change.
+ANALYSIS_SR      = 11025
+ANALYSIS_HOP     = 512
+CQT_FMIN         = librosa.note_to_hz('C1')
+CQT_OCTAVES      = 7
+CQT_BINS_PER_OCT = 36
+MAX_ANALYSIS_SEC = 210
+
+# 2.32s window / 1.16s step, unchanged from the previous 200-frame @ 256/22050
+# geometry so P_STAY stays tuned to the same stride.
+WIN_SECONDS = 2.32
 
 def create_chord_templates():
     templates = {}
@@ -122,6 +114,17 @@ def process_audio_chunk(audio_data):
 
     return {"chord": best_chord, "confidence": float(best_score), "volume": float(rms)}
 
+_FFMPEG_EXE = None
+
+def _ffmpeg_exe():
+    """Resolve ffmpeg once — imageio_ffmpeg.get_ffmpeg_exe() spawns the binary
+    to verify it, which is not something to repeat on every request."""
+    global _FFMPEG_EXE
+    if _FFMPEG_EXE is None:
+        _FFMPEG_EXE = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+    return _FFMPEG_EXE
+
+
 def _ytmusic_url(query):
     import time as _time
     for filter_type in ('songs', 'videos'):
@@ -150,8 +153,8 @@ def download_audio(query, video_id=None):
     print(f"\nSearching YouTube Music for: '{query}'...")
     os.makedirs("static", exist_ok=True)
 
-    # UUID filenames avoid Windows file-lock collisions when browser still holds previous .wav
-    for f in glob.glob("static/downloaded_*.wav"):
+    # UUID filenames avoid Windows file-lock collisions when browser still holds previous file
+    for f in glob.glob("static/downloaded_*"):
         try:
             os.remove(f)
             print(f"[Cleanup] Deleted {f}")
@@ -166,8 +169,7 @@ def download_audio(query, video_id=None):
         url = _ytmusic_url(query) or f"ytsearch1:{query}"
     print(f"[Download] URL: {url}")
 
-    import shutil, subprocess
-    ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_path = _ffmpeg_exe()
 
     cookies_file = os.environ.get("YT_COOKIES_FILE")
     if cookies_file and not os.path.exists(cookies_file):
@@ -176,11 +178,18 @@ def download_audio(query, video_id=None):
     success = False
     title = "Unknown"
 
+    # mediaconnect first: as of yt-dlp 2026.03 it is the only client that still
+    # returns an audio format for most tracks, so leading with anything else
+    # burns a round trip per request. The rest stay as fallbacks since client
+    # viability shifts with yt-dlp releases and with the server's IP.
     client_order = [
-        ['tv_simply'], ['mediaconnect'], ['mweb'], ['ios'], ['tv'], ['web'],
+        ['mediaconnect'], ['tv_simply'], ['mweb'], ['ios'], ['tv'], ['web'],
     ]
+    # Keep the compressed stream as downloaded: transcoding to WAV cost a
+    # re-encode per request and shipped ~50 MB to the browser instead of ~4 MB.
+    # m4a/AAC is preferred over webm/opus purely for Safari playback.
     base_opts = {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'outtmpl': f'{out_base}.%(ext)s',
         'noplaylist': True,
         'quiet': True,
@@ -191,11 +200,6 @@ def download_audio(query, video_id=None):
         },
         'socket_timeout': 30,
         'retries': 2,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'wav',
-            'preferredquality': '192',
-        }]
     }
     if cookies_file:
         base_opts['cookiefile'] = cookies_file
@@ -245,18 +249,9 @@ def download_audio(query, video_id=None):
                 stream = yt.streams.get_audio_only()
                 if stream is None:
                     raise RuntimeError("No audio stream available")
-                tmp_name = f"{os.path.basename(out_base)}.m4a"
-                stream.download(output_path="static", filename=tmp_name)
-                tmp_path = f"static/{tmp_name}"
-                wav_path = f"{out_base}.wav"
-                subprocess.run(
-                    [ffmpeg_path, "-y", "-i", tmp_path, "-ar", str(SR), wav_path],
-                    check=True, capture_output=True,
-                )
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+                # Served as-is; _decode_audio reads it without a WAV round trip.
+                stream.download(output_path="static",
+                                filename=f"{os.path.basename(out_base)}.m4a")
                 title = yt.title
                 success = True
                 print(f"[Download] OK via pytubefix: {title}")
@@ -278,6 +273,41 @@ def download_audio(query, video_id=None):
 
 app = FastAPI()
 active_connections: List[WebSocket] = []
+
+
+def _warm_up_dsp():
+    """Compile librosa's numba kernels on a synthetic clip at boot.
+
+    Cold, the first extraction pays ~4s of JIT locally and noticeably more on a
+    small cloud CPU. Runs on a daemon thread so the port still binds instantly.
+    """
+    try:
+        t0 = time.time()
+        y = np.zeros(ANALYSIS_SR * 3, dtype=np.float32)
+        y[::64] = 0.1
+        C = np.abs(librosa.cqt(
+            y, sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP, fmin=CQT_FMIN,
+            n_bins=CQT_OCTAVES * CQT_BINS_PER_OCT,
+            bins_per_octave=CQT_BINS_PER_OCT))
+        onset_env = librosa.onset.onset_strength(
+            S=librosa.amplitude_to_db(C, ref=np.max),
+            sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP)
+        librosa.beat.beat_track(onset_envelope=onset_env, sr=ANALYSIS_SR,
+                                hop_length=ANALYSIS_HOP, trim=False)
+        C_h, _ = librosa.decompose.hpss(C, margin=3)
+        librosa.feature.chroma_cqt(
+            C=C_h, sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP, fmin=CQT_FMIN,
+            n_octaves=CQT_OCTAVES, bins_per_octave=CQT_BINS_PER_OCT)
+        librosa.estimate_tuning(y=y, sr=ANALYSIS_SR)
+        print(f"[Warmup] DSP kernels ready in {time.time() - t0:.1f}s")
+    except Exception as e:
+        print(f"[Warmup] skipped: {type(e).__name__}: {e}")
+
+
+# `python app.py` runs this file as __main__ and then uvicorn imports it again as
+# "app", so guard the thread or the JIT work is done twice, in parallel, for nothing.
+if __name__ != "__main__":
+    threading.Thread(target=_warm_up_dsp, daemon=True).start()
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -404,22 +434,57 @@ def viterbi_smooth(probs, p_stay=P_STAY):
         path[t - 1] = backptr[t, path[t]]
     return path
 
+def _decode_audio(filepath, sr=ANALYSIS_SR, max_seconds=MAX_ANALYSIS_SEC):
+    """Decode any container ffmpeg understands straight to mono float32.
+
+    Replaces librosa.load, which needs a WAV on disk: soundfile has no webm/m4a
+    backend and librosa's audioread fallback is gone as of 0.10.
+    """
+    ffmpeg_path = _ffmpeg_exe()
+    proc = subprocess.run(
+        [ffmpeg_path, "-v", "quiet", "-t", str(max_seconds), "-i", filepath,
+         "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"],
+        check=True, capture_output=True,
+    )
+    return np.frombuffer(proc.stdout, dtype=np.float32).copy()
+
+
 def extract_chords_from_file(filepath):
-    MAX_ANALYSIS_SEC = 210
-    y, sr = librosa.load(filepath, sr=SR, duration=MAX_ANALYSIS_SEC)
-    song_duration = float(len(y)) / SR
+    y = _decode_audio(filepath)
+    if y.size == 0:
+        return []
+    song_duration = float(len(y)) / ANALYSIS_SR
 
-    y_harmonic = librosa.effects.harmonic(y, margin=3)
+    tuning = float(librosa.estimate_tuning(y=y, sr=ANALYSIS_SR))
 
-    FINE_HOP = HOP_LENGTH // 2
-    chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=SR, hop_length=FINE_HOP)
+    # One CQT feeds beat tracking, harmonic separation and chroma. Computing it
+    # once here is what makes this ~15x faster than separating the waveform with
+    # effects.harmonic and then running a second transform over the result.
+    C = np.abs(librosa.cqt(
+        y, sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP, fmin=CQT_FMIN,
+        n_bins=CQT_OCTAVES * CQT_BINS_PER_OCT,
+        bins_per_octave=CQT_BINS_PER_OCT, tuning=tuning))
+
+    # Beats come off the full CQT, not the percussive half: tonal onsets track
+    # the quarter-note pulse here, where the drum-only envelope halves the tempo.
+    onset_env = librosa.onset.onset_strength(
+        S=librosa.amplitude_to_db(C, ref=np.max),
+        sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP)
+    _, beat_frames = librosa.beat.beat_track(
+        onset_envelope=onset_env, sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP, trim=False)
+
+    # Median-filtering the CQT gives the same harmonic emphasis as
+    # effects.harmonic without the STFT -> mask -> ISTFT round trip.
+    C_harmonic, _ = librosa.decompose.hpss(C, margin=3)
+    chroma = librosa.feature.chroma_cqt(
+        C=C_harmonic, sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP, fmin=CQT_FMIN,
+        n_octaves=CQT_OCTAVES, bins_per_octave=CQT_BINS_PER_OCT)
     chroma_T = chroma.T
     T = chroma_T.shape[0]
 
-    _, beat_frames = librosa.beat.beat_track(
-        y=y_harmonic, sr=SR, hop_length=FINE_HOP, trim=False)
     beat_frames = np.asarray(beat_frames, dtype=int)
-    beat_times  = librosa.frames_to_time(beat_frames, sr=SR, hop_length=FINE_HOP)
+    beat_times  = librosa.frames_to_time(
+        beat_frames, sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP)
     beat_times  = np.append(beat_times, song_duration)
 
     tempo_bpm = (60.0 / float(np.median(np.diff(beat_times[:-1])))
@@ -447,9 +512,9 @@ def extract_chords_from_file(filepath):
     else:                 MIN_SEG = 0.80
     print(f"[Beat] MIN_SEG={MIN_SEG:.2f}s")
 
-    WIN_FRAMES = SEQUENCE_LENGTH
-    STRIDE     = WIN_FRAMES // 2
-    secs_per_frame = FINE_HOP / SR
+    secs_per_frame = ANALYSIS_HOP / ANALYSIS_SR
+    WIN_FRAMES = max(1, int(round(WIN_SECONDS / secs_per_frame)))
+    STRIDE     = max(1, WIN_FRAMES // 2)
 
     # Chroma-template emissions + Viterbi smoothing. The trained transformer was
     # minor-biased (confidently mislabelled major chords as minor), so we decode
