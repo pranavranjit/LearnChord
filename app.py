@@ -871,9 +871,13 @@ async def diag():
             return f"{type(e).__name__}: {str(e)[:50]}"
 
     # huggingface.co and pypi.org are controls: if those fail too, egress is
-    # broken generally rather than YouTube being singled out.
-    HOSTS = ["www.youtube.com", "music.youtube.com", "youtubei.googleapis.com",
-             "www.google.com", "huggingface.co", "pypi.org"]
+    # broken generally rather than YouTube being singled out. The rest are
+    # candidate audio sources - yt-dlp already has extractors for all of them.
+    HOSTS = ["www.youtube.com", "music.youtube.com",
+             "huggingface.co", "pypi.org",
+             "bandcamp.com", "soundcloud.com", "api-v2.soundcloud.com",
+             "archive.org", "api.jamendo.com", "freemusicarchive.org",
+             "ccmixter.org", "opengameart.org"]
 
     def _probe():
         out = {
