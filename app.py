@@ -48,6 +48,10 @@ MAX_ANALYSIS_SEC = 210
 # geometry so P_STAY stays tuned to the same stride.
 WIN_SECONDS = 2.32
 
+# Budget for the whole yt-dlp client walk, chosen to leave headroom under the
+# ~180s HF Spaces gateway timeout so failures return JSON, not a 500 page.
+DOWNLOAD_DEADLINE_SEC = 75
+
 def create_chord_templates():
     templates = {}
     for i, root in enumerate(PITCH_CLASSES):
@@ -114,6 +118,53 @@ def process_audio_chunk(audio_data):
 
     return {"chord": best_chord, "confidence": float(best_score), "volume": float(rms)}
 
+_COOKIE_FILE = None
+_COOKIE_RESOLVED = False
+
+def _cookie_file():
+    """Resolve a Netscape cookie jar for yt-dlp, or None.
+
+    HF Spaces exposes secrets as env vars rather than files, so YT_COOKIES may
+    carry the jar's *contents*; materialise it to a 0600 temp file once.
+    YT_COOKIES_FILE still takes a real path for local runs. The jar is a
+    credential: it is never logged and never written under static/.
+    """
+    global _COOKIE_FILE, _COOKIE_RESOLVED
+    if _COOKIE_RESOLVED:
+        return _COOKIE_FILE
+    _COOKIE_RESOLVED = True
+
+    path = os.environ.get("YT_COOKIES_FILE")
+    if path and os.path.exists(path):
+        _COOKIE_FILE = path
+        print("[Cookies] using jar at YT_COOKIES_FILE")
+        return _COOKIE_FILE
+
+    blob = os.environ.get("YT_COOKIES", "")
+    if not blob.strip():
+        print("[Cookies] none configured - YouTube will likely block a cloud IP")
+        return None
+
+    # Secret editors often turn real newlines into the two characters \ and n.
+    if "\\n" in blob and "\n" not in blob.strip():
+        blob = blob.replace("\\n", "\n")
+    blob = blob.replace("\r\n", "\n").strip()
+    if not blob.startswith("# Netscape"):
+        blob = "# Netscape HTTP Cookie File\n" + blob
+
+    try:
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix="ytcookies_", suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(blob + "\n")
+        os.chmod(tmp, 0o600)
+        _COOKIE_FILE = tmp
+        print(f"[Cookies] loaded jar from YT_COOKIES ({blob.count(chr(10)) + 1} lines)")
+    except Exception as e:
+        print(f"[Cookies] could not write jar: {type(e).__name__}")
+    return _COOKIE_FILE
+
+
 _FFMPEG_EXE = None
 
 def _ffmpeg_exe():
@@ -171,9 +222,7 @@ def download_audio(query, video_id=None):
 
     ffmpeg_path = _ffmpeg_exe()
 
-    cookies_file = os.environ.get("YT_COOKIES_FILE")
-    if cookies_file and not os.path.exists(cookies_file):
-        cookies_file = None
+    cookies_file = _cookie_file()
 
     success = False
     title = "Unknown"
@@ -198,13 +247,20 @@ def download_audio(query, video_id=None):
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         },
-        'socket_timeout': 30,
-        'retries': 2,
+        'socket_timeout': 15,
+        'retries': 1,
     }
     if cookies_file:
         base_opts['cookiefile'] = cookies_file
 
+    # Walking all six clients at 30s/socket could exceed three minutes, long
+    # enough that the platform gateway 500s before we can return a real message.
+    # Stop early and surface our own error while the request is still alive.
+    started = _time.monotonic()
     for client in client_order:
+        if _time.monotonic() - started > DOWNLOAD_DEADLINE_SEC:
+            print(f"[Download] deadline hit after {DOWNLOAD_DEADLINE_SEC}s, giving up")
+            break
         opts = dict(base_opts)
         opts['extractor_args'] = {'youtube': {'player_client': client}}
         print(f"[Download] yt-dlp player_client={client[0]}...")

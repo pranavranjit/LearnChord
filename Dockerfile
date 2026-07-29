@@ -18,6 +18,10 @@ COPY . .
 
 # HF Spaces uses 7860; Render injects $PORT at runtime
 ENV PORT=7860
+# Without this Python block-buffers stdout when it is not a TTY, so every
+# [Download]/[Beat]/[Cookies] line is swallowed and the platform logs show
+# nothing but uvicorn's own output.
+ENV PYTHONUNBUFFERED=1
 EXPOSE 7860
 
 CMD ["python", "app.py"]
