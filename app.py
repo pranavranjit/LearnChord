@@ -52,6 +52,13 @@ WIN_SECONDS = 2.32
 # ~180s HF Spaces gateway timeout so failures return JSON, not a 500 page.
 DOWNLOAD_DEADLINE_SEC = 75
 
+# Cloud containers frequently advertise IPv6 but have no working route to
+# Google, which surfaces as [SSL: UNEXPECTED_EOF_WHILE_READING] partway through
+# the handshake rather than as a clean connection error. Pinning to IPv4 is
+# yt-dlp's --force-ipv4. Set YT_FORCE_IPV4=0 if a host needs v6.
+FORCE_IPV4 = os.environ.get("YT_FORCE_IPV4", "1") != "0"
+IPV4_OPTS = {'source_address': '0.0.0.0'} if FORCE_IPV4 else {}
+
 def create_chord_templates():
     templates = {}
     for i, root in enumerate(PITCH_CLASSES):
@@ -249,6 +256,7 @@ def download_audio(query, video_id=None):
         },
         'socket_timeout': 15,
         'retries': 1,
+        **IPV4_OPTS,
     }
     if cookies_file:
         base_opts['cookiefile'] = cookies_file
@@ -703,7 +711,10 @@ def _ytdlp_search_fallback(query, limit=8):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         },
         'extractor_args': {'youtube': {'player_client': ['mediaconnect', 'tv', 'web']}},
+        **IPV4_OPTS,
     }
+    if _cookie_file():
+        ydl_opts['cookiefile'] = _cookie_file()
     suggestions = []
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
@@ -813,6 +824,55 @@ async def autocomplete(q: str = ""):
             return []
 
     return await loop.run_in_executor(None, _suggest)
+
+@app.get("/api/diag")
+async def diag():
+    """Report whether this host can reach YouTube at all.
+
+    Exists because the Space failed with a bare SSL EOF and nothing in the
+    request path could tell us why. Booleans and versions only - never cookie
+    contents or filesystem paths. Safe to delete once downloads are healthy.
+    """
+    import socket
+
+    def _tls(host, family):
+        import ssl as _ssl
+        try:
+            infos = socket.getaddrinfo(host, 443, family, socket.SOCK_STREAM)
+        except Exception as e:
+            return f"dns: {type(e).__name__}"
+        if not infos:
+            return "no address"
+        af, socktype, proto, _, addr = infos[0]
+        sock = None
+        try:
+            sock = socket.socket(af, socktype, proto)
+            sock.settimeout(8)
+            sock.connect(addr)
+            with _ssl.create_default_context().wrap_socket(
+                    sock, server_hostname=host) as tls:
+                return f"ok ({tls.version()})"
+        except Exception as e:
+            return f"{type(e).__name__}: {str(e)[:70]}"
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
+    def _probe():
+        return {
+            "cookies_configured": bool(_cookie_file()),
+            "force_ipv4": FORCE_IPV4,
+            "yt_dlp": getattr(yt_dlp.version, "__version__", "unknown"),
+            "ffmpeg": bool(_ffmpeg_exe()),
+            "tls_youtube_ipv4": _tls("www.youtube.com", socket.AF_INET),
+            "tls_youtube_ipv6": _tls("www.youtube.com", socket.AF_INET6),
+        }
+
+    return await asyncio.get_running_loop().run_in_executor(None, _probe)
+
 
 @app.get("/")
 def read_root():
