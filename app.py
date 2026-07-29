@@ -861,15 +861,31 @@ async def diag():
                 except OSError:
                     pass
 
+    def _tcp(host, port=443):
+        """TCP-only reach test, to tell a blocked port from a blocked handshake."""
+        try:
+            s = socket.create_connection((host, port), timeout=8)
+            s.close()
+            return "ok"
+        except Exception as e:
+            return f"{type(e).__name__}: {str(e)[:50]}"
+
+    # huggingface.co and pypi.org are controls: if those fail too, egress is
+    # broken generally rather than YouTube being singled out.
+    HOSTS = ["www.youtube.com", "music.youtube.com", "youtubei.googleapis.com",
+             "www.google.com", "huggingface.co", "pypi.org"]
+
     def _probe():
-        return {
+        out = {
             "cookies_configured": bool(_cookie_file()),
             "force_ipv4": FORCE_IPV4,
             "yt_dlp": getattr(yt_dlp.version, "__version__", "unknown"),
             "ffmpeg": bool(_ffmpeg_exe()),
-            "tls_youtube_ipv4": _tls("www.youtube.com", socket.AF_INET),
-            "tls_youtube_ipv6": _tls("www.youtube.com", socket.AF_INET6),
+            "ipv6": _tls("www.youtube.com", socket.AF_INET6),
         }
+        for h in HOSTS:
+            out[h] = {"tcp": _tcp(h), "tls": _tls(h, socket.AF_INET)}
+        return out
 
     return await asyncio.get_running_loop().run_in_executor(None, _probe)
 
