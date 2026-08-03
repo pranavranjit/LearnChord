@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 import numpy as np
 import librosa
@@ -419,6 +420,12 @@ def download_from_url(url):
         resp = opener.open(req, timeout=URL_FETCH_TIMEOUT)
     except ValueError:
         raise
+    except urllib.error.HTTPError as e:
+        # Name the status: "403" tells the user the host refused us, which is a
+        # different fix from a typo'd link.
+        raise ValueError(f"That link returned HTTP {e.code} ({e.reason}).")
+    except urllib.error.URLError as e:
+        raise ValueError(f"Couldn't reach that link ({e.reason}).")
     except Exception as e:
         raise ValueError(f"Couldn't download that link ({type(e).__name__}).")
 
