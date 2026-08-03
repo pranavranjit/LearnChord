@@ -20,6 +20,8 @@ const timelineSection = document.getElementById('timeline-section');
 const songInput        = document.getElementById('song-input');
 const autocompleteList = document.getElementById('autocomplete-list');
 const searchBtn        = document.getElementById('search-btn');
+const urlInput         = document.getElementById('url-input');
+const urlBtn           = document.getElementById('url-btn');
 const loadingContainer = document.getElementById('loading-container');
 const loadingText      = document.getElementById('loading-text');
 const chordGrid        = document.getElementById('chord-grid');
@@ -306,6 +308,44 @@ searchBtn.addEventListener('click', async () => {
         searchBtn.disabled = false;
         loadingContainer.classList.add('hidden');
     }
+});
+
+async function analyzeUrl() {
+    const url = (urlInput.value || '').trim();
+    if (!url) { alert('Paste a link to an audio file first.'); return; }
+
+    resultsSection.classList.add('hidden');
+    loadingContainer.classList.remove('hidden');
+    startLoadingCycle();
+    urlBtn.disabled = true;
+    audioPlayer.pause();
+    audioPlayer.removeAttribute('src');
+    audioPlayer.load();
+    chordTimeline = [];
+
+    try {
+        const response = await fetch('/api/from-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.detail || `Server error ${response.status}`);
+        }
+        handleSongResponse(await response.json());
+    } catch (err) {
+        alert('Error: ' + err.message);
+    } finally {
+        stopLoadingCycle();
+        loadingContainer.classList.add('hidden');
+        urlBtn.disabled = false;
+    }
+}
+
+if (urlBtn)   urlBtn.addEventListener('click', analyzeUrl);
+if (urlInput) urlInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); analyzeUrl(); }
 });
 
 function handleSongResponse(data) {

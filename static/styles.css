@@ -207,6 +207,34 @@ header {
     background: var(--surface-hi);
 }
 
+.url-bar { margin-top: 0.9rem; }
+.url-hint {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+}
+.url-row { display: flex; gap: 0.75rem; align-items: flex-start; }
+.url-row input {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface-hover);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: border-color 0.2s, background 0.2s;
+}
+.url-row input::placeholder { color: var(--text-dim); }
+.url-row input:focus {
+    outline: none;
+    border-color: var(--text);
+    background: var(--surface-hi);
+}
+
 .upload-row {
     display: flex;
     align-items: center;
@@ -477,4 +505,5 @@ header {
     .overview-actions { flex-direction: column; width: 100%; }
     .overview-actions .btn { width: 100%; text-align: center; }
     .search-bar { flex-direction: column; }
+    .url-row { flex-direction: column; }
 }

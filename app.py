@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.request
 import numpy as np
 import librosa
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -22,6 +23,9 @@ ytmusic = ytmusicapi.YTMusic()
 class SearchQuery(BaseModel):
     query: str
     video_id: Optional[str] = None
+
+class UrlQuery(BaseModel):
+    url: str
 
 SR = 22050
 DURATION = 1.0
@@ -334,6 +338,123 @@ def download_audio(query, video_id=None):
         return None
 
     return os.path.basename(downloaded[0])
+
+MAX_URL_AUDIO_BYTES = 60 * 1024 * 1024
+URL_FETCH_TIMEOUT   = 30
+
+# Content-Type -> extension. The browser needs a truthful extension to pick a
+# decoder; ffmpeg sniffs the container itself and ignores the name.
+_CTYPE_EXT = {
+    'audio/mpeg': '.mp3',  'audio/mp3':  '.mp3',  'audio/mp4':   '.m4a',
+    'audio/x-m4a': '.m4a', 'audio/aac':  '.aac',  'audio/ogg':   '.ogg',
+    'audio/opus': '.opus', 'audio/webm': '.webm', 'audio/wav':   '.wav',
+    'audio/x-wav': '.wav', 'audio/flac': '.flac', 'audio/x-flac': '.flac',
+    'video/mp4':  '.m4a',  'video/webm': '.webm',
+}
+_ALLOWED_EXT = set(_CTYPE_EXT.values())
+
+
+def _assert_public_url(url):
+    """Reject anything that could reach this host's own network.
+
+    Fetching a user-supplied URL server-side is an SSRF primitive: unguarded, a
+    request for http://169.254.169.254/... or a private address would be fetched
+    with our credentials and handed back through the audio player. Every DNS
+    answer must be a global address, and this runs again on each redirect hop.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https'):
+        raise ValueError("Only http and https links are supported.")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("That doesn't look like a valid link.")
+
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise ValueError("Couldn't resolve that address.")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global or ip.is_multicast:
+            raise ValueError("That link points to a private address.")
+    return parsed
+
+
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """Re-validate on every hop; otherwise a public URL could 302 to localhost."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _assert_public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def download_from_url(url):
+    import uuid as _uuid
+    from urllib.parse import urlparse, unquote
+
+    url = (url or '').strip()
+    if not url:
+        raise ValueError("Paste a link to an audio file first.")
+    _assert_public_url(url)
+
+    os.makedirs("static", exist_ok=True)
+    for f in glob.glob("static/downloaded_*"):
+        try:
+            os.remove(f)
+        except OSError:
+            print(f"[Cleanup] Skipped (locked): {f}")
+
+    opener = urllib.request.build_opener(_GuardedRedirect())
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'audio/*,video/*;q=0.9,*/*;q=0.8',
+    })
+    print(f"[URL] fetching {urlparse(url).netloc}...")
+    try:
+        resp = opener.open(req, timeout=URL_FETCH_TIMEOUT)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Couldn't download that link ({type(e).__name__}).")
+
+    with resp:
+        ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+        declared = resp.headers.get('Content-Length')
+        if declared and int(declared) > MAX_URL_AUDIO_BYTES:
+            raise ValueError(f"That file is larger than {MAX_URL_AUDIO_BYTES // (1024*1024)} MB.")
+
+        ext = _CTYPE_EXT.get(ctype, '')
+        if not ext:
+            suffix = os.path.splitext(unquote(urlparse(url).path))[1].lower()
+            ext = suffix if suffix in _ALLOWED_EXT else '.bin'
+
+        out_path = f"static/downloaded_{_uuid.uuid4().hex[:12]}{ext}"
+        total = 0
+        with open(out_path, 'wb') as fh:
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_URL_AUDIO_BYTES:
+                    fh.close()
+                    os.remove(out_path)
+                    raise ValueError(
+                        f"That file is larger than {MAX_URL_AUDIO_BYTES // (1024*1024)} MB.")
+                fh.write(chunk)
+
+    if total == 0:
+        os.remove(out_path)
+        raise ValueError("That link returned an empty file.")
+
+    print(f"[URL] got {total/1e6:.1f} MB, content-type={ctype or 'unknown'}")
+    return os.path.basename(out_path)
+
 
 app = FastAPI()
 active_connections: List[WebSocket] = []
@@ -687,6 +808,27 @@ async def search_song(request: SearchQuery):
         raise HTTPException(status_code=400, detail="Couldn't fetch this song. Please try another.")
 
     return await _build_song_response(filename)
+
+
+@app.post("/api/from-url")
+async def search_from_url(request: UrlQuery):
+    """Analyse audio at a direct link, bypassing YouTube entirely."""
+    loop = asyncio.get_running_loop()
+    try:
+        filename = await loop.run_in_executor(None, download_from_url, request.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Couldn't fetch audio from that link.")
+
+    try:
+        return await _build_song_response(filename)
+    except HTTPException:
+        # Reaching here means the bytes downloaded but ffmpeg could not decode
+        # them - usually an HTML error page served with an audio content type.
+        raise HTTPException(
+            status_code=400,
+            detail="That link didn't contain audio we can read. Use a direct link to an audio file.")
 
 
 def _ytmusic_search_with_retry(query, limit=8, attempts=3):
