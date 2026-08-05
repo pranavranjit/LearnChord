@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import os
 import glob
@@ -235,10 +236,13 @@ def _jamendo_search(query, limit=8):
         if not audio:
             continue
         secs = int(r.get('duration') or 0)
+        # Jamendo returns HTML-escaped text, so an artist like "Dada & the
+        # Weathermen" arrives as "Dada &amp; the Weathermen" and would render
+        # literally - the UI sets these via textContent, not innerHTML.
         out.append({
             'trackId':   str(r.get('id') or ''),
-            'title':     r.get('name') or '',
-            'artist':    r.get('artist_name') or '',
+            'title':     html.unescape(r.get('name') or ''),
+            'artist':    html.unescape(r.get('artist_name') or ''),
             'duration':  f"{secs // 60}:{secs % 60:02d}" if secs else '',
             'thumbnail': r.get('album_image') or r.get('image') or '',
             'audio_url': audio,
