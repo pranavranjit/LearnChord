@@ -222,14 +222,28 @@ def _jamendo_get(path, params):
     return payload.get('results') or []
 
 
-def _jamendo_search(query, limit=8):
-    """Search Jamendo tracks, shaped like the old YouTube suggestion payload."""
-    rows = _jamendo_get('tracks', {
-        'search': query,
-        'limit': limit,
-        'audioformat': 'mp31',
-        'order': 'popularity_total',
-    })
+def _jamendo_search(query, limit=8, attempts=3):
+    """Search Jamendo tracks, shaped like the old YouTube suggestion payload.
+
+    Retries an empty result set. From a shared cloud egress IP Jamendo throttles
+    by answering status=success with zero results rather than an error code, so
+    the same query alternates between 8 hits and none; without this the UI
+    reports "no matches" for a search that plainly has them.
+    """
+    rows = []
+    for i in range(attempts):
+        rows = _jamendo_get('tracks', {
+            'search': query,
+            'limit': limit,
+            'audioformat': 'mp31',
+            'order': 'popularity_total',
+        })
+        if rows:
+            break
+        if i + 1 < attempts:
+            print(f"[Jamendo] empty result for '{query}', retrying ({i+1}/{attempts-1})")
+            time.sleep(0.4 * (i + 1))
+
     out = []
     for r in rows:
         audio = r.get('audio') or r.get('audiodownload')
