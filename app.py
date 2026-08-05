@@ -1117,9 +1117,40 @@ async def diag():
              "archive.org", "api.jamendo.com", "freemusicarchive.org",
              "ccmixter.org", "opengameart.org"]
 
+    def _jamendo_probe():
+        """Run a real search and report Jamendo's own headers block.
+
+        The Space gets status=success with zero results for a query that
+        returns plenty locally, so the interesting data is in results_count,
+        warnings and error_message - not in whether the socket opened.
+        """
+        if not JAMENDO_CLIENT_ID:
+            return "not configured"
+        from urllib.parse import urlencode
+        url = f"{JAMENDO_API}/tracks/?" + urlencode({
+            'client_id': JAMENDO_CLIENT_ID, 'format': 'json',
+            'limit': 3, 'search': 'acoustic',
+        })
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'live-chord-ai/1.0'})
+            with urllib.request.urlopen(req, timeout=JAMENDO_TIMEOUT) as r:
+                body = json.loads(r.read().decode('utf-8', 'replace'))
+            head = body.get('headers') or {}
+            return {
+                "status":        head.get('status'),
+                "code":          head.get('code'),
+                "results_count": head.get('results_count'),
+                "error_message": head.get('error_message') or None,
+                "warnings":      head.get('warnings') or None,
+                "first_track":   (body.get('results') or [{}])[0].get('name'),
+            }
+        except Exception as e:
+            return f"{type(e).__name__}: {str(e)[:90]}"
+
     def _probe():
         out = {
             "jamendo_configured": bool(JAMENDO_CLIENT_ID),
+            "jamendo_probe": _jamendo_probe(),
             "search_backend": "jamendo" if JAMENDO_CLIENT_ID else "youtube",
             "cookies_configured": bool(_cookie_file()),
             "force_ipv4": FORCE_IPV4,
