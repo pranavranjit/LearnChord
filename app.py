@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import glob
 import shutil
@@ -63,6 +64,14 @@ DOWNLOAD_DEADLINE_SEC = 75
 # yt-dlp's --force-ipv4. Set YT_FORCE_IPV4=0 if a host needs v6.
 FORCE_IPV4 = os.environ.get("YT_FORCE_IPV4", "1") != "0"
 IPV4_OPTS = {'source_address': '0.0.0.0'} if FORCE_IPV4 else {}
+
+# Jamendo is the search backend wherever YouTube is unreachable (HF Spaces
+# black-holes TLS to www.youtube.com). It serves CC-licensed tracks and, unlike
+# YouTube, hands back a direct MP3 URL - so results feed the same guarded
+# fetch path as a pasted link. Free client_id: https://devportal.jamendo.com/
+JAMENDO_CLIENT_ID = os.environ.get("JAMENDO_CLIENT_ID", "").strip()
+JAMENDO_API       = "https://api.jamendo.com/v3.0"
+JAMENDO_TIMEOUT   = 20
 
 def create_chord_templates():
     templates = {}
@@ -186,6 +195,55 @@ def _ffmpeg_exe():
     if _FFMPEG_EXE is None:
         _FFMPEG_EXE = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
     return _FFMPEG_EXE
+
+
+def _jamendo_get(path, params):
+    """Call the Jamendo REST API and return its results list.
+
+    Jamendo answers HTTP 200 even for auth failures, putting the real status in
+    headers.status, so that has to be checked explicitly rather than trusting
+    the status code.
+    """
+    from urllib.parse import urlencode
+    if not JAMENDO_CLIENT_ID:
+        raise RuntimeError("JAMENDO_CLIENT_ID is not set")
+
+    query = dict(params, client_id=JAMENDO_CLIENT_ID)
+    query.setdefault('format', 'json')
+    url = f"{JAMENDO_API}/{path}/?{urlencode(query)}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'live-chord-ai/1.0'})
+    with urllib.request.urlopen(req, timeout=JAMENDO_TIMEOUT) as resp:
+        payload = json.loads(resp.read().decode('utf-8', 'replace'))
+
+    head = payload.get('headers') or {}
+    if head.get('status') != 'success':
+        raise RuntimeError(head.get('error_message') or 'Jamendo API error')
+    return payload.get('results') or []
+
+
+def _jamendo_search(query, limit=8):
+    """Search Jamendo tracks, shaped like the old YouTube suggestion payload."""
+    rows = _jamendo_get('tracks', {
+        'search': query,
+        'limit': limit,
+        'audioformat': 'mp31',
+        'order': 'popularity_total',
+    })
+    out = []
+    for r in rows:
+        audio = r.get('audio') or r.get('audiodownload')
+        if not audio:
+            continue
+        secs = int(r.get('duration') or 0)
+        out.append({
+            'trackId':   str(r.get('id') or ''),
+            'title':     r.get('name') or '',
+            'artist':    r.get('artist_name') or '',
+            'duration':  f"{secs // 60}:{secs % 60:02d}" if secs else '',
+            'thumbnail': r.get('album_image') or r.get('image') or '',
+            'audio_url': audio,
+        })
+    return out
 
 
 def _ytmusic_url(query):
@@ -899,6 +957,18 @@ async def suggest_songs(q: str = ""):
     loop = asyncio.get_running_loop()
 
     def _search():
+        # Jamendo first when configured: it works from hosts that cannot reach
+        # YouTube, and its results carry a directly playable audio_url.
+        if JAMENDO_CLIENT_ID:
+            try:
+                hits = _jamendo_search(q, limit=8)
+                if hits:
+                    return hits
+                print("[Jamendo] no matches")
+            except Exception as e:
+                print(f"[Jamendo] search failed: {e}")
+            return []
+
         try:
             results = _ytmusic_search_with_retry(q, limit=8)
             suggestions = []
@@ -938,6 +1008,21 @@ async def autocomplete(q: str = ""):
 
     def _suggest():
         import time as _time
+        # Jamendo has no dedicated suggest endpoint, so build phrases from the
+        # track search itself. Deduped because one artist often fills the page.
+        if JAMENDO_CLIENT_ID:
+            try:
+                seen, out = set(), []
+                for r in _jamendo_search(q, limit=6):
+                    phrase = f"{r['artist']} {r['title']}".strip() if r['artist'] else r['title']
+                    if phrase and phrase.lower() not in seen:
+                        seen.add(phrase.lower())
+                        out.append(phrase)
+                return out
+            except Exception as e:
+                print(f"[Autocomplete] jamendo failed: {e}")
+                return []
+
         for attempt in range(2):
             try:
                 suggestions = ytmusic.get_search_suggestions(q)
@@ -1030,6 +1115,8 @@ async def diag():
 
     def _probe():
         out = {
+            "jamendo_configured": bool(JAMENDO_CLIENT_ID),
+            "search_backend": "jamendo" if JAMENDO_CLIENT_ID else "youtube",
             "cookies_configured": bool(_cookie_file()),
             "force_ipv4": FORCE_IPV4,
             "yt_dlp": getattr(yt_dlp.version, "__version__", "unknown"),

@@ -293,7 +293,12 @@ searchBtn.addEventListener('click', async () => {
             pick.textContent = '▶';
             li.appendChild(pick);
 
-            li.addEventListener('click', () => extractChords(song.videoId, query));
+            // Jamendo results carry a playable URL; YouTube ones need the
+            // download path. Prefer the direct link when it is there.
+            li.addEventListener('click', () => {
+                if (song.audio_url) analyzeUrl(song.audio_url);
+                else                extractChords(song.videoId, query);
+            });
             resultsList.appendChild(li);
         });
 
@@ -310,8 +315,8 @@ searchBtn.addEventListener('click', async () => {
     }
 });
 
-async function analyzeUrl() {
-    const url = (urlInput.value || '').trim();
+async function analyzeUrl(directUrl) {
+    const url = (typeof directUrl === 'string' ? directUrl : (urlInput.value || '')).trim();
     if (!url) { alert('Paste a link to an audio file first.'); return; }
 
     resultsSection.classList.add('hidden');
@@ -343,7 +348,7 @@ async function analyzeUrl() {
     }
 }
 
-if (urlBtn)   urlBtn.addEventListener('click', analyzeUrl);
+if (urlBtn)   urlBtn.addEventListener('click', () => analyzeUrl());
 if (urlInput) urlInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); analyzeUrl(); }
 });
