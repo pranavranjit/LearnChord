@@ -53,9 +53,14 @@ CQT_BINS_PER_OCT = 36
 # tier only because analyses are serialised; drop it if a host is tighter.
 MAX_ANALYSIS_SEC = int(os.environ.get("MAX_ANALYSIS_SEC", "210"))
 
-# 2.32s window / 1.16s step, unchanged from the previous 200-frame @ 256/22050
-# geometry so P_STAY stays tuned to the same stride.
-WIN_SECONDS = 2.32
+# Analysis window; the step is half of it. This was 2.32s purely because the
+# retired transformer used 200 frames at 256/22050, and it was too long: pop
+# chords change every 1-2s, so each window straddled a change and Viterbi
+# resolved the ambiguity by flattening it. "Let It Be" came back as one C for
+# the whole song. Measured over six songs with known chord sets, recall of the
+# true chords went 81% -> 100% at 1.0s, with no song regressing. P_STAY barely
+# moved the result in the same sweep, so it stays where it was.
+WIN_SECONDS = float(os.environ.get("WIN_SECONDS", "1.0"))
 
 # Budget for the whole yt-dlp client walk, chosen to leave headroom under the
 # ~180s HF Spaces gateway timeout so failures return JSON, not a 500 page.
@@ -75,6 +80,20 @@ IPV4_OPTS = {'source_address': '0.0.0.0'} if FORCE_IPV4 else {}
 JAMENDO_CLIENT_ID = os.environ.get("JAMENDO_CLIENT_ID", "").strip()
 JAMENDO_API       = "https://api.jamendo.com/v3.0"
 JAMENDO_TIMEOUT   = 20
+
+# iTunes Search is the default backend: it is the only source that carries the
+# mainstream catalogue, needs no key, and cannot be bot-challenged, so it works
+# identically on a laptop, on Render and on HF Spaces. The cost is that its
+# audio is a 30s preview clip - enough to read a progression, since pop chord
+# loops repeat, but not the whole arrangement.
+# Override with SEARCH_BACKEND=youtube (full length, needs YouTube reachable)
+# or SEARCH_BACKEND=jamendo (full length, Creative Commons catalogue only).
+ITUNES_API      = "https://itunes.apple.com/search"
+ITUNES_TIMEOUT  = 15
+ITUNES_COUNTRY  = os.environ.get("ITUNES_COUNTRY", "US").strip() or "US"
+SEARCH_BACKEND  = os.environ.get("SEARCH_BACKEND", "itunes").strip().lower()
+if SEARCH_BACKEND not in ("itunes", "youtube", "jamendo"):
+    SEARCH_BACKEND = "itunes"
 # Fetch a wider pool than we show, so the most-listened of the matches can rise
 # to the top rather than whichever eight Jamendo happened to return first.
 JAMENDO_POOL      = 30
@@ -201,6 +220,45 @@ def _ffmpeg_exe():
     if _FFMPEG_EXE is None:
         _FFMPEG_EXE = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
     return _FFMPEG_EXE
+
+
+def _itunes_search(query, limit=8):
+    """Search the iTunes catalogue, shaped like the other backends.
+
+    audio_url is Apple's 30s preview clip, which is served openly and needs no
+    credentials. The listed duration is the *track's* real length so results
+    stay identifiable, annotated so nobody expects 4 minutes of audio.
+    """
+    from urllib.parse import urlencode
+
+    q = (query or '').strip()
+    if not q:
+        return []
+
+    url = f"{ITUNES_API}?" + urlencode({
+        'term': q, 'entity': 'song', 'limit': limit, 'country': ITUNES_COUNTRY,
+    })
+    req = urllib.request.Request(url, headers={'User-Agent': 'live-chord-ai/1.0'})
+    with urllib.request.urlopen(req, timeout=ITUNES_TIMEOUT) as resp:
+        payload = json.loads(resp.read().decode('utf-8', 'replace'))
+
+    out = []
+    for r in payload.get('results') or []:
+        audio = r.get('previewUrl')
+        if not audio:
+            continue
+        secs = int((r.get('trackTimeMillis') or 0) / 1000)
+        art = r.get('artworkUrl100') or r.get('artworkUrl60') or ''
+        out.append({
+            'trackId':   str(r.get('trackId') or ''),
+            'title':     r.get('trackName') or '',
+            'artist':    r.get('artistName') or '',
+            'duration':  (f"{secs // 60}:{secs % 60:02d} · 30s clip" if secs
+                          else "30s clip"),
+            'thumbnail': art.replace('100x100', '300x300'),
+            'audio_url': audio,
+        })
+    return out
 
 
 def _jamendo_get(path, params):
@@ -449,6 +507,8 @@ URL_FETCH_TIMEOUT   = 30
 _CTYPE_EXT = {
     'audio/mpeg': '.mp3',  'audio/mp3':  '.mp3',  'audio/mp4':   '.m4a',
     'audio/x-m4a': '.m4a', 'audio/aac':  '.aac',  'audio/ogg':   '.ogg',
+    # Apple serves its preview clips as x-m4p; the payload is ordinary AAC.
+    'audio/x-m4p': '.m4a',
     'audio/opus': '.opus', 'audio/webm': '.webm', 'audio/wav':   '.wav',
     'audio/x-wav': '.wav', 'audio/flac': '.flac', 'audio/x-flac': '.flac',
     'video/mp4':  '.m4a',  'video/webm': '.webm',
@@ -1012,9 +1072,16 @@ async def suggest_songs(q: str = ""):
     loop = asyncio.get_running_loop()
 
     def _search():
-        # Jamendo first when configured: it works from hosts that cannot reach
-        # YouTube, and its results carry a directly playable audio_url.
-        if JAMENDO_CLIENT_ID:
+        # iTunes by default: mainstream catalogue, no key, no bot challenge, and
+        # results carry a directly playable preview URL.
+        if SEARCH_BACKEND == "itunes":
+            try:
+                return _itunes_search(q, limit=8)
+            except Exception as e:
+                print(f"[iTunes] search failed: {type(e).__name__}: {e}")
+                return []
+
+        if SEARCH_BACKEND == "jamendo":
             try:
                 hits = _jamendo_search(q, limit=8)
                 if hits:
@@ -1061,19 +1128,29 @@ async def autocomplete(q: str = ""):
         return []
     loop = asyncio.get_running_loop()
 
+    def _phrases(rows):
+        """Neither iTunes nor Jamendo has a suggest endpoint, so build phrases
+        from the track search itself. Deduped - one artist often fills a page."""
+        seen, out = set(), []
+        for r in rows:
+            phrase = f"{r['artist']} {r['title']}".strip() if r['artist'] else r['title']
+            if phrase and phrase.lower() not in seen:
+                seen.add(phrase.lower())
+                out.append(phrase)
+        return out
+
     def _suggest():
         import time as _time
-        # Jamendo has no dedicated suggest endpoint, so build phrases from the
-        # track search itself. Deduped because one artist often fills the page.
-        if JAMENDO_CLIENT_ID:
+        if SEARCH_BACKEND == "itunes":
             try:
-                seen, out = set(), []
-                for r in _jamendo_search(q, limit=6):
-                    phrase = f"{r['artist']} {r['title']}".strip() if r['artist'] else r['title']
-                    if phrase and phrase.lower() not in seen:
-                        seen.add(phrase.lower())
-                        out.append(phrase)
-                return out
+                return _phrases(_itunes_search(q, limit=6))
+            except Exception as e:
+                print(f"[Autocomplete] itunes failed: {type(e).__name__}")
+                return []
+
+        if SEARCH_BACKEND == "jamendo":
+            try:
+                return _phrases(_jamendo_search(q, limit=6))
             except Exception as e:
                 print(f"[Autocomplete] jamendo failed: {e}")
                 return []
@@ -1162,11 +1239,9 @@ async def diag():
     # huggingface.co and pypi.org are controls: if those fail too, egress is
     # broken generally rather than YouTube being singled out. The rest are
     # candidate audio sources - yt-dlp already has extractors for all of them.
-    HOSTS = ["www.youtube.com", "music.youtube.com",
-             "huggingface.co", "pypi.org",
-             "bandcamp.com", "soundcloud.com", "api-v2.soundcloud.com",
-             "archive.org", "api.jamendo.com", "freemusicarchive.org",
-             "ccmixter.org", "opengameart.org"]
+    HOSTS = ["itunes.apple.com", "audio-ssl.itunes.apple.com",
+             "www.youtube.com", "api.jamendo.com",
+             "huggingface.co", "pypi.org"]
 
     def _jamendo_probe():
         """Run a real search and report Jamendo's own headers block.
@@ -1200,9 +1275,9 @@ async def diag():
 
     def _probe():
         out = {
+            "search_backend": SEARCH_BACKEND,
             "jamendo_configured": bool(JAMENDO_CLIENT_ID),
-            "jamendo_probe": _jamendo_probe(),
-            "search_backend": "jamendo" if JAMENDO_CLIENT_ID else "youtube",
+            "jamendo_probe": _jamendo_probe() if SEARCH_BACKEND == "jamendo" else "skipped",
             "cookies_configured": bool(_cookie_file()),
             "force_ipv4": FORCE_IPV4,
             "yt_dlp": getattr(yt_dlp.version, "__version__", "unknown"),
