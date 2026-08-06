@@ -73,6 +73,9 @@ IPV4_OPTS = {'source_address': '0.0.0.0'} if FORCE_IPV4 else {}
 JAMENDO_CLIENT_ID = os.environ.get("JAMENDO_CLIENT_ID", "").strip()
 JAMENDO_API       = "https://api.jamendo.com/v3.0"
 JAMENDO_TIMEOUT   = 20
+# Fetch a wider pool than we show, so the most-listened of the matches can rise
+# to the top rather than whichever eight Jamendo happened to return first.
+JAMENDO_POOL      = 30
 
 def create_chord_templates():
     templates = {}
@@ -222,33 +225,53 @@ def _jamendo_get(path, params):
     return payload.get('results') or []
 
 
-def _jamendo_search(query, limit=8, attempts=3):
-    """Search Jamendo tracks, shaped like the old YouTube suggestion payload.
+def _jamendo_tracks(limit, retry=False, **params):
+    """One /tracks/ call, optionally retrying an empty-but-successful reply.
 
-    Retries an empty result set. From a shared cloud egress IP Jamendo throttles
-    by answering status=success with zero results rather than an error code, so
-    the same query alternates between 8 hits and none; without this the UI
-    reports "no matches" for a search that plainly has them.
+    Jamendo throttles a shared cloud egress IP by returning status=success with
+    zero results rather than an error, so the identical query alternates between
+    hits and nothing.
     """
-    rows = []
+    attempts = 3 if retry else 1
     for i in range(attempts):
-        rows = _jamendo_get('tracks', {
-            'search': query,
-            'limit': limit,
-            'audioformat': 'mp31',
-            'order': 'popularity_total',
-        })
-        if rows:
-            break
-        if i + 1 < attempts:
-            print(f"[Jamendo] empty result for '{query}', retrying ({i+1}/{attempts-1})")
-            time.sleep(0.4 * (i + 1))
+        rows = _jamendo_get('tracks', dict(params, limit=limit, audioformat='mp31'))
+        if rows or i + 1 >= attempts:
+            return rows
+        print(f"[Jamendo] empty reply, retrying ({i+1}/{attempts-1})")
+        time.sleep(0.4 * (i + 1))
+    return []
+
+
+def _listens(track):
+    try:
+        return int((track.get('stats') or {}).get('rate_listened_total') or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _jamendo_search(query, limit=8):
+    """Best-known tracks matching the query.
+
+    Jamendo's own order=popularity_total does not mean "popular matches" - it
+    disregards the search terms, so "Dazie Mae Move On" comes back as an
+    unrelated chart track. Relevance is therefore left to the default ordering
+    and popularity applied afterwards, over a wider pool than we display, using
+    the listen counts that include=stats returns.
+    """
+    q = (query or '').strip()
+    if not q:
+        return []
+
+    rows = _jamendo_tracks(JAMENDO_POOL, retry=True, search=q, include='stats')
+    if not rows:
+        rows = _jamendo_tracks(JAMENDO_POOL, name=q, include='stats')
+
+    rows = [r for r in rows if r.get('audio') or r.get('audiodownload')]
+    rows.sort(key=_listens, reverse=True)
 
     out = []
-    for r in rows:
+    for r in rows[:limit]:
         audio = r.get('audio') or r.get('audiodownload')
-        if not audio:
-            continue
         secs = int(r.get('duration') or 0)
         # Jamendo returns HTML-escaped text, so an artist like "Dada & the
         # Weathermen" arrives as "Dada &amp; the Weathermen" and would render
