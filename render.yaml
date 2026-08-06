@@ -3,7 +3,23 @@ services:
     name: live-chord-ai
     runtime: docker
     plan: free
+    dockerfilePath: ./Dockerfile
+    # uvicorn binds before the DSP warmup thread finishes, so the app answers
+    # here within a second or two of boot even though warmup takes ~30s.
     healthCheckPath: /
     envVars:
       - key: PORT
         value: 7860
+      # A single extraction peaks near 400MB of the free tier's 512MB, so
+      # analyses are queued rather than run concurrently. Raise this only on a
+      # paid instance with more memory.
+      - key: MAX_CONCURRENT_ANALYSES
+        value: 1
+      # JAMENDO_CLIENT_ID is deliberately unset: YouTube is reachable from
+      # Render, so search uses it and finds mainstream tracks. Setting the key
+      # would switch search to Jamendo's Creative Commons catalogue instead.
+      #
+      # If YouTube starts asking this host to prove it is not a bot, add
+      # YT_COOKIES in the Render dashboard with the contents of a Netscape
+      # cookies.txt export. Unlike on HF Spaces, cookies do help here, because
+      # the TLS handshake to www.youtube.com actually completes.

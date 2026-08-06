@@ -49,7 +49,9 @@ ANALYSIS_HOP     = 512
 CQT_FMIN         = librosa.note_to_hz('C1')
 CQT_OCTAVES      = 7
 CQT_BINS_PER_OCT = 36
-MAX_ANALYSIS_SEC = 210
+# Working set scales with this. 210s peaks near 400MB, which fits a 512MB free
+# tier only because analyses are serialised; drop it if a host is tighter.
+MAX_ANALYSIS_SEC = int(os.environ.get("MAX_ANALYSIS_SEC", "210"))
 
 # 2.32s window / 1.16s step, unchanged from the previous 200-frame @ 256/22050
 # geometry so P_STAY stays tuned to the same stride.
@@ -767,9 +769,13 @@ def extract_chords_from_file(filepath):
     # Median-filtering the CQT gives the same harmonic emphasis as
     # effects.harmonic without the STFT -> mask -> ISTFT round trip.
     C_harmonic, _ = librosa.decompose.hpss(C, margin=3)
+    del C
     chroma = librosa.feature.chroma_cqt(
         C=C_harmonic, sr=ANALYSIS_SR, hop_length=ANALYSIS_HOP, fmin=CQT_FMIN,
         n_octaves=CQT_OCTAVES, bins_per_octave=CQT_BINS_PER_OCT)
+    # Only the 12-row chroma is needed from here on; the 252-row CQTs and the
+    # decoded waveform are the bulk of the footprint on a 512MB host.
+    del C_harmonic, y
     chroma_T = chroma.T
     T = chroma_T.shape[0]
 
@@ -868,12 +874,20 @@ def extract_chords_from_file(filepath):
     return timeline
 
 
+# One analysis at a time by default. A single extraction peaks near 400MB and
+# Render's free tier caps at 512MB, so two at once would be OOM-killed mid
+# request; queueing is slower for the second user but survivable. Raise
+# MAX_CONCURRENT_ANALYSES on a bigger host.
+_EXTRACT_SEM = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_ANALYSES", "1")))
+
+
 async def _build_song_response(filename: str):
     loop = asyncio.get_running_loop()
     try:
-        timeline = await loop.run_in_executor(
-            None, extract_chords_from_file, f"static/{filename}"
-        )
+        async with _EXTRACT_SEM:
+            timeline = await loop.run_in_executor(
+                None, extract_chords_from_file, f"static/{filename}"
+            )
     except Exception as e:
         print(f"Chroma extraction error: {e}")
         raise HTTPException(status_code=500, detail="Chord extraction failed.")
