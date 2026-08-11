@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Audio diagnostic</title>
+<style>
+  body { font-family: monospace; background:#121212; color:#eee; padding:1.5rem; line-height:1.55; }
+  h2 { color:#1DB954; margin:1.2rem 0 .4rem; font-size:1rem; }
+  #log { white-space:pre-wrap; background:#1e1e1e; padding:1rem; border-radius:6px;
+         max-height:22rem; overflow:auto; font-size:.82rem; }
+  .ok { color:#1DB954; } .bad { color:#ff5c5c; } .warn { color:#f5c518; }
+  button { background:#1DB954; border:0; color:#000; padding:.6rem 1.1rem;
+           border-radius:4px; font-weight:700; cursor:pointer; margin-right:.5rem; }
+  audio { width:100%; margin-top:1rem; }
+</style>
+</head>
+<body>
+<h1 style="font-size:1.1rem">Live Chord AI — audio diagnostic</h1>
+<p>Runs the real search → analyse → play path and reports exactly where it stops.</p>
+<button id="run">Run test</button>
+<button id="playbtn">Play manually</button>
+<h2>Log</h2>
+<div id="log">idle</div>
+<audio id="a" controls></audio>
+
+<script>
+const logEl = document.getElementById('log');
+const a = document.getElementById('a');
+let lines = [];
+function log(msg, cls) {
+  lines.push(cls ? `<span class="${cls}">${msg}</span>` : msg);
+  logEl.innerHTML = lines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+['loadstart','loadedmetadata','loadeddata','canplay','canplaythrough','playing',
+ 'pause','waiting','stalled','suspend','abort','emptied','ended','error']
+  .forEach(ev => a.addEventListener(ev, () => {
+    log(`  event: ${ev}  (readyState=${a.readyState} networkState=${a.networkState})`);
+  }));
+
+a.addEventListener('error', () => {
+  const c = a.error ? a.error.code : '?';
+  const names = {1:'ABORTED',2:'NETWORK',3:'DECODE',4:'SRC_NOT_SUPPORTED'};
+  log(`  MediaError code=${c} ${names[c]||''}  message=${(a.error&&a.error.message)||'(none)'}`, 'bad');
+});
+
+document.getElementById('run').onclick = async () => {
+  lines = []; log('--- codec support ---');
+  ['audio/mp4', 'audio/mp4; codecs="mp4a.40.2"', 'audio/mpeg', 'audio/webm; codecs="opus"']
+    .forEach(t => log(`  canPlayType(${t}) = "${a.canPlayType(t) || 'NO'}"`,
+                      a.canPlayType(t) ? 'ok' : 'bad'));
+
+  log('\n--- search ---');
+  let rows;
+  try {
+    rows = await (await fetch('/api/suggest?q=perfect')).json();
+  } catch (e) { return log('  search failed: ' + e, 'bad'); }
+  if (!rows.length) return log('  no results', 'bad');
+  log(`  ${rows.length} results, using: ${rows[0].artist} - ${rows[0].title}`, 'ok');
+
+  log('\n--- analyse ---');
+  let data;
+  try {
+    const r = await fetch('/api/from-url', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ url: rows[0].audio_url })
+    });
+    data = await r.json();
+    if (!r.ok) return log('  server said: ' + (data.detail || r.status), 'bad');
+  } catch (e) { return log('  analyse failed: ' + e, 'bad'); }
+  log(`  ok: ${data.timeline.length} segments, chords ${JSON.stringify(data.main_chords)}`, 'ok');
+  log(`  audio_url = ${data.audio_url}`);
+
+  log('\n--- HEAD on the audio ---');
+  try {
+    const h = await fetch(data.audio_url, { method: 'HEAD' });
+    log(`  HTTP ${h.status}  type=${h.headers.get('content-type')}  len=${h.headers.get('content-length')}`,
+        h.ok ? 'ok' : 'bad');
+  } catch (e) { log('  HEAD failed: ' + e, 'bad'); }
+
+  log('\n--- load + play ---');
+  a.src = data.audio_url + '?t=' + Date.now();
+  a.load();
+  try {
+    await a.play();
+    log(`  play() resolved — paused=${a.paused} currentTime=${a.currentTime.toFixed(2)}`,
+        a.paused ? 'warn' : 'ok');
+  } catch (e) {
+    log(`  play() REJECTED: ${e.name}: ${e.message}`, 'bad');
+    log('  (NotAllowedError here means autoplay policy, not a broken file)', 'warn');
+  }
+  setTimeout(() => log(`\n  after 2s: paused=${a.paused} currentTime=${a.currentTime.toFixed(2)} `
+                     + `duration=${a.duration} readyState=${a.readyState}`,
+                     a.currentTime > 0 ? 'ok' : 'bad'), 2000);
+};
+
+document.getElementById('playbtn').onclick = () => {
+  a.play().then(() => log('  manual play() ok, paused=' + a.paused, 'ok'))
+          .catch(e => log('  manual play() rejected: ' + e.name + ': ' + e.message, 'bad'));
+};
+</script>
+</body>
+</html>

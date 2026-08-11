@@ -504,10 +504,35 @@ practiceBtn.addEventListener('click', () => {
     } else {
         audioPlayer.addEventListener('loadedmetadata', go, { once: true });
     }
+
+    // The button says "Play & Practice" but never started playback. Called
+    // synchronously here on purpose: browsers only honour play() while the
+    // user gesture is still on the stack, so deferring it into the
+    // loadedmetadata callback above would get it blocked.
+    audioPlayer.play().catch(err => {
+        console.warn('Playback did not start:', err);
+        playPauseBtn.textContent = '▶ Play';
+    });
 });
 
 playPauseBtn.addEventListener('click', () => {
     audioPlayer.paused ? audioPlayer.play() : audioPlayer.pause();
+});
+
+// A failed load was completely silent before: no audio, no message, and a
+// playhead sitting at 0:00 with no explanation.
+audioPlayer.addEventListener('error', () => {
+    const codes = {
+        1: 'loading was aborted',
+        2: 'network error',
+        3: 'the audio could not be decoded',
+        4: 'this audio format is not supported by your browser',
+    };
+    const err = audioPlayer.error;
+    const why = (err && codes[err.code]) || 'unknown error';
+    console.error('Audio failed:', why, audioPlayer.currentSrc);
+    timeDisplay.textContent = `audio unavailable — ${why}`;
+    playPauseBtn.textContent = '▶ Play';
 });
 
 newSearchBtn.addEventListener('click', () => {

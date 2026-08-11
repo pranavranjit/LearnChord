@@ -261,6 +261,36 @@ def _itunes_search(query, limit=8):
     return out
 
 
+def _to_playable(path):
+    """Re-encode to MP3 so the browser can actually play what we serve.
+
+    Apple's preview clips are ordinary AAC LC in a standard M4A/isom container
+    with no encryption, and ffmpeg decodes them fine - but Chrome refused them
+    with DEMUXER_ERROR_NO_SUPPORTED_STREAMS, which is what a browser built
+    without the proprietary AAC decoder reports for any AAC file. MP3 is the one
+    audio format no mainstream browser rejects, and re-encoding also normalises
+    whatever odd container a source hands us. ~0.3s for a 30s clip.
+    """
+    if path.lower().endswith('.mp3'):
+        return path
+    out = os.path.splitext(path)[0] + '.mp3'
+    try:
+        subprocess.run(
+            [_ffmpeg_exe(), '-y', '-v', 'quiet', '-i', path,
+             '-vn', '-c:a', 'libmp3lame', '-b:a', '192k', out],
+            check=True, capture_output=True,
+        )
+    except Exception as e:
+        print(f"[Audio] MP3 conversion failed ({type(e).__name__}); serving original")
+        return path
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    print(f"[Audio] -> {os.path.basename(out)} ({os.path.getsize(out)/1e6:.1f} MB mp3)")
+    return out
+
+
 def _jamendo_get(path, params):
     """Call the Jamendo REST API and return its results list.
 
@@ -497,7 +527,7 @@ def download_audio(query, video_id=None):
         print("Error: audio file was not saved.")
         return None
 
-    return os.path.basename(downloaded[0])
+    return os.path.basename(_to_playable(downloaded[0]))
 
 MAX_URL_AUDIO_BYTES = 60 * 1024 * 1024
 URL_FETCH_TIMEOUT   = 30
@@ -621,7 +651,7 @@ def download_from_url(url):
         raise ValueError("That link returned an empty file.")
 
     print(f"[URL] got {total/1e6:.1f} MB, content-type={ctype or 'unknown'}")
-    return os.path.basename(out_path)
+    return os.path.basename(_to_playable(out_path))
 
 
 app = FastAPI()
