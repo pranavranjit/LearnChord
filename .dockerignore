@@ -14,6 +14,9 @@ __pycache__/
 .env
 *.env
 
+# Design review artefacts (screenshots, briefs); the app never serves them
+.impeccable/
+
 # Old dataset files (model is already baked in)
 X_dataset.npy
 y_dataset.npy

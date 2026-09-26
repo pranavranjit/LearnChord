@@ -3,112 +3,322 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Chord AI</title>
+    <title>LiveChord · See a song's chords, then play along</title>
+    <meta name="description" content="Search any song. LiveChord works out its chords from a 30-second preview, draws each one as a guitar shape, then listens through your mic while you play along.">
+    <meta name="theme-color" content="#1C1C1E">
+    <meta name="color-scheme" content="light">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="LiveChord">
+    <meta property="og:title" content="LiveChord · See a song's chords, then play along">
+    <meta property="og:description" content="Pick any song and LiveChord works out its chords from the audio, shows guitar shapes on a timeline, then listens through your mic while you play along.">
+    <meta property="og:url" content="https://sunny2802-live-chord-ai.hf.space/">
+    <meta property="og:image" content="https://sunny2802-live-chord-ai.hf.space/static/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="LiveChord's amp-style panel showing a song's chords as guitar shapes above a play-along timeline.">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="static/styles.css?v=12">
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="static/styles.css?v=30">
 </head>
 <body>
-    <div class="background-elements">
-        <div class="blob top-left"></div>
-        <div class="blob bottom-right"></div>
-    </div>
+    <svg class="sprite" aria-hidden="true" focusable="false">
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.2v13.6a1 1 0 0 0 1.53.85l10.88-6.8a1 1 0 0 0 0-1.7L9.53 4.35A1 1 0 0 0 8 5.2Z" fill="currentColor"/></symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4.5" height="14" rx="1.25" fill="currentColor"/><rect x="13.5" y="5" width="4.5" height="14" rx="1.25" fill="currentColor"/></symbol>
+        <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+        <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 5h5v5m0-5-8 8m7 1v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4.2-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+        <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M4 16v-4a8 8 0 0 1 16 0v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="3" y="14" width="5" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="16" y="14" width="5" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    </svg>
 
-    <div class="container">
-        <header>
-            <div class="brand">
-                <h1>Live Chord AI</h1>
-                <span class="subtitle">Search · Extract · Practice</span>
-            </div>
-            <div class="header-controls">
-                <div class="eq-icon" id="eq-icon">
-                    <div class="eq-bar"></div>
-                    <div class="eq-bar"></div>
-                    <div class="eq-bar"></div>
-                    <div class="eq-bar"></div>
-                </div>
-                <button id="mic-toggle" class="btn primary disabled hidden" disabled>Start Listening</button>
-                <div class="status">
-                    <div class="status-indicator"></div>
-                    <span id="connection-status">Connecting...</span>
-                </div>
-            </div>
+    <a class="skip-link" href="#song-input">Skip to search</a>
+
+    <div class="cab">
+        <header class="cab-top">
+            <nav class="cab-nav" aria-label="Site">
+                <a href="#how">How it works</a>
+                <a href="https://github.com/pranavranjit/LearnChord" target="_blank" rel="noopener">Source<svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>
+            </nav>
         </header>
 
-        <section class="search-panel glass-panel" id="search-section">
-            <div class="search-bar">
-                <div class="autocomplete-wrapper">
-                    <input type="text" id="song-input" placeholder="Search for a song or artist…" autocomplete="off" />
-                    <ul id="autocomplete-list" class="autocomplete-items hidden"></ul>
-                </div>
-                <button id="search-btn" class="btn action">Search</button>
-            </div>
-            <div id="loading-container" class="hidden">
-                <div class="spinner"></div>
-                <span id="loading-text">Downloading &amp; analyzing audio…</span>
-            </div>
-        </section>
+        <div class="front">
+            <main class="panel" id="panel">
+                <div class="panel-head">
+                    <a class="wordmark" href="/">LiveChord</a>
 
-        <section class="results-panel glass-panel hidden" id="results-section">
-            <h2>Select a Song</h2>
-            <ul id="results-list" class="results-list"></ul>
-        </section>
+                    <ol class="states" id="states" aria-label="Steps">
+                        <li data-stage="search" class="on">
+                            <button type="button" class="state-btn" data-go="search" aria-current="step">
+                                <span class="lamp" aria-hidden="true"></span><span class="state-n" aria-hidden="true">1</span><span class="state-label">Pick a song</span>
+                            </button>
+                        </li>
+                        <li data-stage="chords">
+                            <button type="button" class="state-btn" data-go="chords" disabled>
+                                <span class="lamp" aria-hidden="true"></span><span class="state-n" aria-hidden="true">2</span><span class="state-label">See its chords</span>
+                            </button>
+                        </li>
+                        <li data-stage="play">
+                            <button type="button" class="state-btn" data-go="play" disabled>
+                                <span class="lamp" aria-hidden="true"></span><span class="state-n" aria-hidden="true">3</span><span class="state-label">Play along</span>
+                            </button>
+                        </li>
+                    </ol>
 
-        <section class="overview-panel glass-panel hidden" id="overview-section">
-            <h2>Chord Patterns</h2>
-            <p class="subtitle">Main chords sorted by how often they appear.<br>Select one to set as your practice target.</p>
-            <div id="chord-grid" class="chord-grid"></div>
-            <div class="overview-actions">
-                <button id="practice-btn" class="btn action glow-btn">▶ Play &amp; Practice</button>
-                <button id="new-search-btn" class="btn danger">New Search</button>
-            </div>
-        </section>
+                    <div class="power" title="Connection to the live-analysis server">
+                        <span class="jewel status-indicator" aria-hidden="true"></span>
+                        <span class="power-copy">
+                            <span class="legend legend-sm">Live server</span>
+                            <span id="connection-status" class="power-state" role="status">Connecting…</span>
+                        </span>
+                    </div>
+                </div>
 
-        <section class="timeline-section glass-panel hidden" id="timeline-section">
-            <div class="timeline-header">
-                <div class="now-playing">
-                    <span class="now-label">Now</span>
-                    <span class="now-chord" id="now-chord">--</span>
-                </div>
-                <div class="timeline-controls">
-                    <button id="play-pause-btn" class="btn action">▶ Play</button>
-                    <button id="back-to-overview-btn" class="btn danger">Back</button>
-                </div>
-                <span class="time-display" id="time-display">0:00 / 0:00</span>
-            </div>
+                <!-- ============ 1 · Pick a song ============ -->
+                <section class="stage stage-search" id="search-section" aria-labelledby="hero-title">
+                    <h1 id="hero-title"><span>Hear a song.</span> <span>See its chords.</span> <span>Play along.</span></h1>
+                    <p class="lede">
+                        Search any song. LiveChord works out its chords from a 30-second preview,
+                        draws each one as a guitar shape, then listens through your mic and lights
+                        up when you play the right chord.
+                    </p>
 
-            <div class="timeline-track" id="timeline-track">
-                <div class="playhead" id="playhead"></div>
-            </div>
+                    <div class="group">
+                        <div class="group-head">
+                            <label class="legend" for="song-input">Input</label>
+                            <p class="group-note">Any song on iTunes</p>
+                        </div>
+                        <form class="input-row" id="search-form" autocomplete="off" role="search">
+                            <div class="input-slot autocomplete-wrapper">
+                                <svg class="icon input-icon" aria-hidden="true"><use href="#i-search"/></svg>
+                                <input type="search" id="song-input" placeholder="Song or artist" enterkeyhint="search"
+                                       aria-autocomplete="list" aria-controls="autocomplete-list" aria-expanded="false">
+                                <ul id="autocomplete-list" class="autocomplete-items hidden" role="listbox" aria-label="Suggestions"></ul>
+                            </div>
+                            <button id="search-btn" class="key" type="submit">Search</button>
+                        </form>
+                    </div>
 
-            <audio id="audio-player"></audio>
+                    <div id="error-banner" class="fault hidden" role="alert">
+                        <span class="lamp lit" aria-hidden="true"></span>
+                        <span id="error-text" class="fault-text"></span>
+                        <button type="button" class="fault-close" id="error-close" aria-label="Dismiss">
+                            <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+                        </button>
+                    </div>
 
-            <div class="practice-row">
-                <div class="practice-box" id="player-box">
-                    <h4>You Play</h4>
-                    <div class="practice-chord" id="current-chord">--</div>
-                </div>
-                <div class="practice-vs">VS</div>
-                <div class="practice-box" id="target-box">
-                    <h4>Target</h4>
-                    <div class="practice-chord" id="target-chord">--</div>
-                </div>
-            </div>
+                    <div id="loading-container" class="warmup hidden" aria-live="polite">
+                        <ol class="warmup-steps" id="loading-steps"></ol>
+                        <span class="elapsed" id="loading-elapsed">0.0s</span>
+                        <p class="warmup-note hidden" id="loading-note">Songs nobody has picked recently take a little longer.</p>
+                    </div>
 
-            <div class="metrics">
-                <div class="metric">
-                    <span class="label">Confidence</span>
-                    <span id="confidence-val" class="value">0%</span>
+                    <section class="group results hidden" id="results-section" aria-labelledby="results-title">
+                        <div class="group-head">
+                            <h2 class="legend" id="results-title">Pick a song</h2>
+                            <p class="group-note" id="results-meta"></p>
+                        </div>
+                        <ul id="results-list" class="results-list"></ul>
+                    </section>
+
+                    <div class="group presets">
+                        <div class="group-head">
+                            <h2 class="legend" id="presets-title">Presets</h2>
+                            <p class="group-note">One press to its chords</p>
+                        </div>
+                        <div id="example-chips" class="preset-bank" role="group" aria-labelledby="presets-title"></div>
+                    </div>
+                </section>
+
+                <!-- ============ 2 · See its chords ============ -->
+                <section class="stage stage-chords hidden" id="overview-section" aria-labelledby="song-title">
+                    <div class="song-card">
+                        <img id="song-art" class="song-art" src="static/sleeve.svg" alt="" width="120" height="120">
+                        <div class="song-meta">
+                            <h2 id="song-title">Song</h2>
+                            <p id="song-artist" class="song-artist"></p>
+                            <span class="tag">30-second preview analysed</span>
+                        </div>
+                        <div class="song-actions">
+                            <button id="practice-btn" class="key key-lg" type="button">
+                                <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Play along
+                            </button>
+                            <button id="new-search-btn" class="key-outline" type="button">New search</button>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3 class="legend">Chords in this song</h3>
+                            <p class="group-note">Longest-playing first. Press one to practise it with your mic.</p>
+                        </div>
+                        <div id="chord-grid" class="chord-grid"></div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3 class="legend">Progression</h3>
+                            <p class="group-note">In order, as the preview plays</p>
+                        </div>
+                        <ol id="progression" class="progression"></ol>
+                    </div>
+                </section>
+
+                <!-- ============ 3 · Play along ============ -->
+                <section class="stage stage-play hidden" id="timeline-section" aria-labelledby="player-title">
+                    <div class="song-strip">
+                        <img id="player-art" class="strip-art" src="static/sleeve.svg" alt="" width="52" height="52">
+                        <div class="strip-meta">
+                            <h2 class="strip-title" id="player-title"></h2>
+                            <p class="strip-artist" id="player-artist"></p>
+                        </div>
+                        <button id="back-to-overview-btn" class="key-outline key-sm" type="button">
+                            <svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>Chords
+                        </button>
+                    </div>
+
+                    <div class="deck">
+                        <button id="play-pause-btn" class="key key-round" type="button" aria-label="Play">
+                            <svg class="icon i-play" aria-hidden="true"><use href="#i-play"/></svg>
+                            <svg class="icon i-pause" aria-hidden="true"><use href="#i-pause"/></svg>
+                        </button>
+                        <div class="readout readout-now">
+                            <span class="legend">Now</span>
+                            <span class="chord rung-1" id="now-chord">–</span>
+                        </div>
+                        <div class="readout readout-next">
+                            <span class="legend">Next <span id="next-in" class="next-in"></span></span>
+                            <span class="chord rung-2" id="next-chord">–</span>
+                        </div>
+                        <span class="counter" id="time-display">0:00 / 0:00</span>
+                    </div>
+
+                    <div class="track-wrap">
+                        <div class="timeline-track" id="timeline-track" title="Click to jump" role="slider" tabindex="0"
+                             aria-label="Song position" aria-valuemin="0" aria-valuemax="30" aria-valuenow="0" aria-valuetext="0:00">
+                            <div class="playhead" id="playhead"></div>
+                        </div>
+                        <div class="track-scale" id="track-scale" aria-hidden="true"></div>
+                    </div>
+                    <audio id="audio-player" preload="auto"></audio>
+
+                    <div class="practice">
+                        <div class="practice-controls">
+                            <div class="control-group">
+                                <span class="legend" id="channel-legend">Channel</span>
+                                <div class="mode-toggle" role="group" aria-labelledby="channel-legend">
+                                    <button type="button" data-mode="song" class="active" aria-pressed="true"><span class="lamp" aria-hidden="true"></span>Follow the song</button>
+                                    <button type="button" data-mode="drill" aria-pressed="false"><span class="lamp" aria-hidden="true"></span>Drill a chord</button>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <span class="legend" id="mic-legend">Mic</span>
+                                <button id="mic-toggle" class="bat" type="button" role="switch" aria-checked="false"
+                                        aria-labelledby="mic-legend" aria-describedby="mic-action" disabled>
+                                    <span class="bat-body" aria-hidden="true"><span class="bat-lever"></span></span>
+                                    <span class="bat-copy">
+                                        <span class="bat-state" id="mic-state">Standby</span>
+                                        <span class="bat-action" id="mic-action">Waiting for the server</span>
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="drill-picker hidden" id="drill-picker" role="group" aria-label="Chord to drill"></div>
+
+                        <div class="practice-row">
+                            <div class="practice-box" id="player-box">
+                                <span class="legend">You're playing</span>
+                                <span class="chord rung-2" id="current-chord">–</span>
+                                <div class="level">
+                                    <span class="legend legend-sm">Level</span>
+                                    <div class="meter" aria-hidden="true"><div class="meter-fill" id="volume-bar"></div></div>
+                                </div>
+                            </div>
+                            <div class="match-meter" id="match-badge">
+                                <span class="match-lamp" aria-hidden="true"></span>
+                                <span class="legend match-text" id="match-text">Mic off</span>
+                            </div>
+                            <div class="practice-box" id="target-box">
+                                <span class="legend" id="target-label">Song chord now</span>
+                                <span class="chord rung-2" id="target-chord">–</span>
+                                <div class="mini-diagram" id="target-diagram"></div>
+                            </div>
+                        </div>
+
+                        <div class="practice-stats">
+                            <div class="gauge">
+                                <span class="legend">Confidence</span>
+                                <span class="gauge-val" id="confidence-val">–</span>
+                                <div class="scale idle" id="confidence-scale" aria-hidden="true">
+                                    <span class="pointer"></span>
+                                    <span class="scale-nums"><span>0</span><span>5</span><span>10</span></span>
+                                </div>
+                            </div>
+                            <div class="gauge">
+                                <span class="legend">On target</span>
+                                <span class="gauge-val" id="accuracy-val">–</span>
+                                <div class="scale idle" id="accuracy-scale" aria-hidden="true">
+                                    <span class="pointer"></span>
+                                    <span class="scale-nums"><span>0</span><span>5</span><span>10</span></span>
+                                </div>
+                            </div>
+                            <div class="gauge gauge-count">
+                                <span class="legend">Best streak</span>
+                                <span class="gauge-val" id="streak-val">–</span>
+                            </div>
+                        </div>
+                        <p class="hint" id="mic-hint">
+                            <svg class="icon" aria-hidden="true"><use href="#i-headphones"/></svg>
+                            Wear headphones so the mic hears your guitar, not the song.
+                        </p>
+                    </div>
+                </section>
+            </main>
+
+            <!-- ============ How it works ============ -->
+            <section class="grille" id="how" aria-labelledby="how-title">
+                <div class="plate">
+                    <h2 class="plate-title" id="how-title">How it works</h2>
+                    <ol class="how-steps">
+                        <li>
+                            <h3><span class="how-n" aria-hidden="true">1</span>Pick a song</h3>
+                            <p>Search runs on the iTunes catalogue, which has a 30-second preview of almost every track. Songs repeat their chords, so 30 seconds is usually enough to hear the pattern.</p>
+                        </li>
+                        <li>
+                            <h3><span class="how-n" aria-hidden="true">2</span>See its chords</h3>
+                            <p>LiveChord listens to the preview, works out which notes are sounding moment by moment and matches them to the 24 major and minor chords. Changes are smoothed, lined up with the beat, and every chord is drawn as a guitar shape.</p>
+                        </li>
+                        <li>
+                            <h3><span class="how-n" aria-hidden="true">3</span>Play along</h3>
+                            <p>Flip the mic on and play. Four times a second the same matching runs on your guitar, and the green lamp lights when you are on the chord the song is playing, or the one you chose to drill.</p>
+                        </li>
+                    </ol>
+                    <dl class="specs">
+                        <div><dt>Audio</dt><dd>Apple's 30-second previews, not whole songs</dd></div>
+                        <div><dt>Chords</dt><dd>Major and minor only: no sevenths, suspended or diminished chords</dd></div>
+                        <div><dt>Shapes</dt><dd>Standard guitar voicings, open and barre</dd></div>
+                        <div><dt>Mic</dt><dd>Needs your permission; headphones keep the song out of it</dd></div>
+                        <div><dt>Built with</dt><dd>Python, FastAPI, WebSockets, librosa, NumPy and the Web Audio API</dd></div>
+                    </dl>
                 </div>
-                <div class="metric">
-                    <span class="label">Volume</span>
-                    <span id="volume-val" class="value">0.000</span>
-                </div>
-            </div>
-        </section>
+            </section>
+        </div>
+
+        <footer class="cab-bottom">
+            <p>
+                Built by <a href="https://www.linkedin.com/in/pranav2ranjit" target="_blank" rel="noopener">Pranav</a>
+                <span class="sep" aria-hidden="true">/</span>
+                <a href="https://github.com/pranavranjit/LearnChord" target="_blank" rel="noopener">Source on GitHub</a>
+                <span class="sep" aria-hidden="true">/</span>
+                Audio previews courtesy of Apple
+            </p>
+        </footer>
     </div>
 
-    <script src="static/script.js?v=12"></script>
+    <script src="static/script.js?v=30"></script>
 </body>
 </html>

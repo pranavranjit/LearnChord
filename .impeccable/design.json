@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-26T00:00:00Z",
+  "title": "Design System: LiveChord",
+  "extensions": {
+    "colorMeta": {
+      "aluminium": { "role": "neutral", "displayName": "Brushed Aluminium", "canonical": "#D8DCDF", "tonalRamp": ["#101213", "#27292A", "#404345", "#606466", "#838789", "#A7ABAE", "#CACED1", "#ECEFF0"] },
+      "aluminium-highlight": { "role": "neutral", "displayName": "Aluminium Highlight", "canonical": "#EEF0F1", "tonalRamp": ["#111212", "#282929", "#414343", "#626364", "#858687", "#A9ABAC", "#CCCECF", "#EDEFEF"] },
+      "aluminium-shadow": { "role": "neutral", "displayName": "Aluminium Shadow", "canonical": "#C3C9CD", "tonalRamp": ["#101213", "#27292B", "#3E4346", "#5F6468", "#81878B", "#A6ACB0", "#C9CFD3", "#ECEFF1"] },
+      "tolex": { "role": "neutral", "displayName": "Tolex Black", "canonical": "#1C1C1E", "tonalRamp": ["#111112", "#29292A", "#424244", "#636365", "#868688", "#AAAAAD", "#CDCDD0", "#EEEEF0"] },
+      "piping": { "role": "neutral", "displayName": "Cream Piping", "canonical": "#ECE9E1", "tonalRamp": ["#13110F", "#2A2925", "#45423C", "#66635C", "#89867F", "#ADABA3", "#D0CEC6", "#F0EEEA"] },
+      "grille-cloth": { "role": "neutral", "displayName": "Grille Cloth", "canonical": "#A9BDBE", "tonalRamp": ["#0B1314", "#222B2B", "#354647", "#556768", "#778A8B", "#9CAFB0", "#BED2D3", "#E6F1F2"] },
+      "silkscreen-ink": { "role": "neutral", "displayName": "Silkscreen Ink", "canonical": "#14171C", "tonalRamp": ["#101214", "#27292C", "#3F4348", "#60636A", "#82868D", "#A7ABB2", "#CACED5", "#ECEFF3"] },
+      "ink-secondary": { "role": "neutral", "displayName": "Ink Secondary", "canonical": "#3E444C", "tonalRamp": ["#0F1215", "#26292D", "#3D434B", "#5D646C", "#808790", "#A4ABB5", "#C7CED8", "#EBEFF4"] },
+      "ink-tertiary": { "role": "neutral", "displayName": "Ink Tertiary", "canonical": "#525961", "tonalRamp": ["#0F1215", "#26292D", "#3C434B", "#5D646C", "#7F8790", "#A4ACB5", "#C7CFD8", "#EAEFF4"] },
+      "rule": { "role": "neutral", "displayName": "Rule", "canonical": "rgba(20, 23, 28, 0.32)" },
+      "rule-soft": { "role": "neutral", "displayName": "Rule Soft", "canonical": "rgba(20, 23, 28, 0.14)" },
+      "wash": { "role": "neutral", "displayName": "Wash", "canonical": "rgba(20, 23, 28, 0.06)" },
+      "key-face": { "role": "neutral", "displayName": "Key Face", "canonical": "#1E2228", "tonalRamp": ["#101215", "#27292C", "#3E4349", "#5F646B", "#81878E", "#A6ABB3", "#C9CED6", "#ECEFF3"] },
+      "key-top": { "role": "neutral", "displayName": "Key Top", "canonical": "#2F353D", "tonalRamp": ["#0F1216", "#26292D", "#3D434B", "#5D646D", "#808790", "#A4ABB5", "#C7CED9", "#EBEFF5"] },
+      "key-skirt": { "role": "neutral", "displayName": "Key Skirt", "canonical": "#090B0D", "tonalRamp": ["#111213", "#28292A", "#404345", "#616466", "#848689", "#A8ABAE", "#CBCED1", "#EDEFF0"] },
+      "key-ink": { "role": "neutral", "displayName": "Key Ink", "canonical": "#F1F3F4", "tonalRamp": ["#111212", "#282929", "#414343", "#626364", "#858687", "#A9ABAC", "#CCCECF", "#EDEFEF"] },
+      "key-ink-muted": { "role": "neutral", "displayName": "Key Ink Muted", "canonical": "#AEB6BC", "tonalRamp": ["#0F1214", "#26292C", "#3D4348", "#5D646A", "#80878D", "#A4ACB2", "#C7CFD5", "#EBEFF3"] },
+      "field": { "role": "neutral", "displayName": "Input Window", "canonical": "#F7F8F8", "tonalRamp": ["#111212", "#282929", "#424242", "#626363", "#858686", "#AAABAB", "#CDCECE", "#EEEEEE"] },
+      "field-hint": { "role": "neutral", "displayName": "Field Hint", "canonical": "#596068", "tonalRamp": ["#0F1215", "#26292D", "#3C434B", "#5D646C", "#80878F", "#A4ACB5", "#C7CFD8", "#EAEFF4"] },
+      "jewel-red": { "role": "primary", "displayName": "Jewel Red", "canonical": "#D9342B", "tonalRamp": ["#340000", "#530203", "#910000", "#BB050A", "#E74337", "#FF6C5D", "#FF917F", "#FFD2C4"] },
+      "jewel-hot": { "role": "primary", "displayName": "Jewel Hot", "canonical": "#FF6A55", "tonalRamp": ["#320000", "#500A04", "#8B0000", "#B52010", "#E04D3A", "#FF755F", "#FF9981", "#FFD5C6"] },
+      "jewel-off": { "role": "primary", "displayName": "Jewel Off", "canonical": "#5E1D18", "tonalRamp": ["#240605", "#3F1E1A", "#6C2A24", "#924C44", "#B96F66", "#E19389", "#FFB6AB", "#FFE2DB"] },
+      "match-green": { "role": "secondary", "displayName": "Match Green", "canonical": "#2FB36A", "tonalRamp": ["#001B00", "#003413", "#005712", "#007B36", "#06A058", "#48C77C", "#70EB9E", "#C2FFD5"] },
+      "match-hot": { "role": "secondary", "displayName": "Match Hot", "canonical": "#8AF5B0", "tonalRamp": ["#001A02", "#003316", "#00561B", "#00793C", "#2B9E5E", "#58C482", "#7DE8A4", "#C7FED8"] },
+      "major-chip": { "role": "neutral", "displayName": "Major Chip", "canonical": "#F3F4F5" },
+      "minor-chip-ink": { "role": "neutral", "displayName": "Minor Chip Ink", "canonical": "#EEF1F2" },
+      "plate-ink": { "role": "neutral", "displayName": "Plate Ink", "canonical": "#EDEFF0", "tonalRamp": ["#111212", "#282929", "#414343", "#626364", "#858687", "#A9ABAC", "#CCCECF", "#EDEFEF"] },
+      "plate-ink-muted": { "role": "neutral", "displayName": "Plate Ink Muted", "canonical": "#B4BCC2", "tonalRamp": ["#0F1214", "#26292C", "#3D4348", "#5D646A", "#80878D", "#A4ACB2", "#C7CFD5", "#EBEFF3"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The single H1, three short sentences." },
+      "headline": { "displayName": "Headline", "purpose": "Song title on the chords panel." },
+      "title": { "displayName": "Title", "purpose": "Instruction plate heading." },
+      "chord-rung-1": { "displayName": "Chord Rung 1", "purpose": "Now readout." },
+      "chord-rung-2": { "displayName": "Chord Rung 2", "purpose": "Next, You're playing, Song chord now." },
+      "chord-rung-3": { "displayName": "Chord Rung 3", "purpose": "Chord plates." },
+      "chord-rung-4": { "displayName": "Chord Rung 4", "purpose": "Progression steps and drill keys." },
+      "chord-rung-5": { "displayName": "Chord Rung 5", "purpose": "Timeline blocks; 0.5625rem at -0.02em on narrow blocks, hidden on the narrowest." },
+      "body": { "displayName": "Body", "purpose": "Running copy." },
+      "lede": { "displayName": "Lede", "purpose": "One-sentence lede under the H1, 60ch measure." },
+      "label": { "displayName": "Silkscreen Legend", "purpose": "Uppercase, 125% wide legends over control groups and readouts." },
+      "key-legend": { "displayName": "Key Legend", "purpose": "Uppercase legends printed on push keys." }
+    },
+    "fonts": [
+      { "family": "Archivo", "source": "https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap", "axes": "wdth 62-125, wght 100-900", "note": "Width is set with font-stretch (100-125%)." }
+    ],
+    "textures": [
+      { "name": "tex-brush", "purpose": "Brushed aluminium grain on the panel, overlay blend." },
+      { "name": "tex-tolex", "purpose": "Tolex grain on the page and cabinet." },
+      { "name": "tex-weave", "purpose": "6px grille-cloth weave." },
+      { "name": "tex-sparkle", "purpose": "White sparkle fleck on the grille." },
+      { "name": "tex-sparkle-2", "purpose": "Second, pale-cyan sparkle layer." },
+      { "name": "tex-mottle", "purpose": "Low-frequency mottle on the grille, overlay blend." }
+    ],
+    "shadows": [
+      { "name": "cabinet", "value": "0 22px 50px -12px rgba(0, 0, 0, 0.65), 0 2px 4px rgba(0, 0, 0, 0.4)", "purpose": "The panel front on the tolex. Used once." },
+      { "name": "key-rest", "value": "inset 0 1px 1px rgba(255, 255, 255, 0.14), 0 3px 8px rgba(8, 10, 12, 0.28)", "purpose": "Push keys at rest." },
+      { "name": "key-pressed", "value": "inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 1px 3px rgba(8, 10, 12, 0.3)", "purpose": "Push key while pressed, with a 2px drop." },
+      { "name": "key-latched", "value": "inset 0 2px 4px rgba(0, 0, 0, 0.55)", "purpose": "Latched toggle and drill keys." },
+      { "name": "well", "value": "inset 0 2px 5px rgba(20, 23, 28, 0.16)", "purpose": "Input window; the timeline uses 0.25, practice boxes 0.1." },
+      { "name": "counter", "value": "inset 0 2px 4px rgba(0, 0, 0, 0.6), 0 1px 1px rgba(255, 255, 255, 0.6)", "purpose": "Recessed time readout." },
+      { "name": "plate-rest", "value": "inset 0 1px 1px rgba(255, 255, 255, 0.9), 0 2px 6px rgba(20, 23, 28, 0.14)", "purpose": "Chord plates at rest." },
+      { "name": "plate-hover", "value": "inset 0 1px 1px rgba(255, 255, 255, 0.9), 0 10px 20px rgba(20, 23, 28, 0.18)", "purpose": "Chord plate lifted 2px on hover." },
+      { "name": "lamp-glow", "value": "0 0 12px 3px rgba(255, 80, 58, 0.5)", "purpose": "Lit power jewel; 0 0 16px 5px at 0.6 while listening; small lamps 0 0 7px 1px." },
+      { "name": "match-glow", "value": "0 0 22px 6px rgba(47, 179, 106, 0.5)", "purpose": "Lit match lamp only." },
+      { "name": "match-box", "value": "inset 0 0 0 1.5px #2FB36A, 0 0 22px rgba(47, 179, 106, 0.3)", "purpose": "You and Target boxes in the matched state." },
+      { "name": "dropdown", "value": "0 14px 30px rgba(20, 23, 28, 0.25)", "purpose": "Autocomplete list." }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Damped easing for lamps, levers, pointers and the morph." },
+      { "name": "key-press", "value": "transform 70ms ease-out", "purpose": "Keys drop 2px (outline keys 1px)." },
+      { "name": "lamp-on", "value": "opacity 180ms", "purpose": "Small lamps warm on; jewels 220ms, match lamp 120ms." },
+      { "name": "lever", "value": "transform 170ms", "purpose": "Bat-switch lever snaps between STANDBY and LISTEN." },
+      { "name": "pointer", "value": "left 320ms", "purpose": "Scale pointers ease like meter needles." },
+      { "name": "blink-working", "value": "blink 0.9s ease-in-out infinite", "purpose": "Lamps that mean working: loading preset, loading result, active analysis step." },
+      { "name": "blink-power", "value": "blink 1.4s (0.7s when down)", "purpose": "Power jewel while connecting or when the server is down." },
+      { "name": "bump", "value": "160ms ease-out, scale 0.985", "purpose": "Practice box acknowledges a new detection." },
+      { "name": "song-morph", "value": "340ms ease-out", "purpose": "View Transitions morph of the song object across states." },
+      { "name": "root-crossfade", "value": "old root held opaque (animation none); new root fades in 200ms", "purpose": "No dip toward the tolex during a state change." },
+      { "name": "reduced-motion", "value": "all animation off, transitions 0.01ms", "purpose": "Instant state changes." }
+    ],
+    "breakpoints": [
+      { "name": "deck", "value": "1060px" },
+      { "name": "tablet", "value": "860px" },
+      { "name": "phone", "value": "720px" },
+      { "name": "narrow", "value": "560px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Push Key",
+      "kind": "button",
+      "refersTo": "key",
+      "description": "Black push key with a 3px skirt; the primary action control (Search, Play along).",
+      "html": "<button class=\"ds-key\">Search</button>",
+      "css": ".ds-key { --ds-top: #2F353D; --ds-face: #1E2228; display: inline-flex; align-items: center; justify-content: center; gap: 0.55rem; min-height: 58px; padding: 0 1.6rem 3px; border: 0; border-radius: 5px; background: linear-gradient(180deg, var(--ds-top), var(--ds-face) 60%, var(--ds-face) calc(100% - 3px), #090B0D calc(100% - 3px)); color: #F1F3F4; font-family: Archivo, 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 0.875rem; font-weight: 700; font-stretch: 118%; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; box-shadow: inset 0 1px 1px rgba(255,255,255,0.14), 0 3px 8px rgba(8,10,12,0.28); transition: transform 70ms ease-out, box-shadow 140ms cubic-bezier(0.16,1,0.3,1); } .ds-key:hover { --ds-top: #3A414A; --ds-face: #262B32; } .ds-key:active { transform: translateY(2px); box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 1px 3px rgba(8,10,12,0.3); } .ds-key:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; }"
+    },
+    {
+      "name": "Latched Toggle Key",
+      "kind": "button",
+      "refersTo": "key-latched",
+      "description": "A toggle key that stays down with its jewel lamp lit (Follow the song / Drill a chord).",
+      "html": "<button class=\"ds-toggle is-on\"><span class=\"ds-lamp\"></span>Follow the song</button>",
+      "css": ".ds-toggle { display: inline-flex; align-items: center; gap: 0.55rem; min-height: 52px; padding: 0 1.2rem 3px; border: 0; border-radius: 5px; background: linear-gradient(180deg, #2F353D, #1E2228 60%, #1E2228 calc(100% - 3px), #090B0D calc(100% - 3px)); color: #F1F3F4; font-family: Archivo, sans-serif; font-size: 0.8125rem; font-weight: 700; font-stretch: 118%; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; box-shadow: inset 0 1px 1px rgba(255,255,255,0.14), 0 3px 8px rgba(8,10,12,0.28); transition: transform 70ms ease-out; } .ds-toggle:hover { background: linear-gradient(180deg, #3A414A, #262B32 60%, #262B32 calc(100% - 3px), #090B0D calc(100% - 3px)); } .ds-toggle.is-on { transform: translateY(2px); background: linear-gradient(180deg, #16191D, #1E2228 60%, #1E2228 calc(100% - 3px), #090B0D calc(100% - 3px)); box-shadow: inset 0 2px 4px rgba(0,0,0,0.55); } .ds-toggle:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; } .ds-lamp { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 36% 30%, #9C4C44 0 12%, #5E1D18 55%, #2F0D0A 100%); } .ds-toggle.is-on .ds-lamp { background: radial-gradient(circle at 36% 30%, #FFE1DA 0 10%, #FF6A55 32%, #D9342B 70%, #8E1A12 100%); box-shadow: 0 0 7px 1px rgba(255,86,64,0.6); }"
+    },
+    {
+      "name": "Outline Key",
+      "kind": "button",
+      "refersTo": "key-outline",
+      "description": "Secondary action printed on the panel: 1.5px ink border, ink legend.",
+      "html": "<button class=\"ds-key-outline\">Chords</button>",
+      "css": ".ds-key-outline { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 48px; padding: 0 1.2rem; border: 1.5px solid #14171C; border-radius: 5px; background: transparent; color: #14171C; font-family: Archivo, sans-serif; font-size: 0.8125rem; font-weight: 700; font-stretch: 118%; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: background-color 150ms, transform 70ms ease-out; } .ds-key-outline:hover { background: rgba(20,23,28,0.06); } .ds-key-outline:active { transform: translateY(1px); } .ds-key-outline:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; }"
+    },
+    {
+      "name": "Input Window",
+      "kind": "input",
+      "refersTo": "input-window",
+      "description": "Recessed search field with a jewel-red caret.",
+      "html": "<label class=\"ds-legend\" for=\"ds-in\">Input</label><input id=\"ds-in\" class=\"ds-input\" type=\"search\" placeholder=\"Song or artist\">",
+      "css": ".ds-legend { display: block; margin-bottom: 0.85rem; font-family: Archivo, sans-serif; font-size: 0.75rem; font-weight: 700; font-stretch: 125%; letter-spacing: 0.14em; text-transform: uppercase; color: #14171C; } .ds-input { width: 100%; height: 58px; padding: 0 1rem; border: 1.5px solid #14171C; border-radius: 5px; background: #F7F8F8; box-shadow: inset 0 2px 5px rgba(20,23,28,0.16); color: #14171C; font-family: Archivo, sans-serif; font-size: 1.0625rem; font-weight: 500; caret-color: #D9342B; appearance: none; } .ds-input::placeholder { color: #596068; } .ds-input:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; }"
+    },
+    {
+      "name": "State Strip",
+      "kind": "nav",
+      "refersTo": "state-button",
+      "description": "Three numbered states joined by rules; the current state is ink with its lamp lit.",
+      "html": "<ol class=\"ds-states\"><li class=\"on\"><button class=\"ds-state\"><span class=\"ds-dot\"></span><span class=\"ds-n\">1</span>Pick a song</button></li><li><button class=\"ds-state\"><span class=\"ds-dot\"></span><span class=\"ds-n\">2</span>See its chords</button></li><li><button class=\"ds-state\"><span class=\"ds-dot\"></span><span class=\"ds-n\">3</span>Play along</button></li></ol>",
+      "css": ".ds-states { display: flex; align-items: center; list-style: none; padding: 0; margin: 0; } .ds-states li { display: flex; align-items: center; } .ds-states li + li::before { content: ''; width: 34px; height: 1.5px; margin: 0 0.3rem; background: rgba(20,23,28,0.32); } .ds-state { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 40px; padding: 0 0.55rem; border: 0; border-radius: 4px; background: none; color: #525961; font-family: Archivo, sans-serif; font-size: 0.6875rem; font-weight: 700; font-stretch: 122%; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-state:hover { background: rgba(20,23,28,0.06); color: #14171C; } .ds-state:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; } .ds-states li.on .ds-state { color: #14171C; } .ds-n { display: inline-grid; place-items: center; width: 1.3rem; height: 1.3rem; border: 1.5px solid currentColor; border-radius: 50%; font-size: 0.625rem; letter-spacing: 0; } .ds-dot { width: 10px; height: 10px; border-radius: 50%; background: #5E1D18; } .ds-states li.on .ds-dot { background: radial-gradient(circle at 36% 30%, #FFE1DA 0 10%, #FF6A55 32%, #D9342B 70%); box-shadow: 0 0 7px 1px rgba(255,86,64,0.6); }"
+    },
+    {
+      "name": "Chord Chips",
+      "kind": "chip",
+      "refersTo": "chord-chip-major",
+      "description": "Progression steps: major prints light, minor prints on the key face; rung 4.",
+      "html": "<span class=\"ds-step\">A</span><span class=\"ds-step ds-minor\">F<sup>&#9839;</sup>m</span>",
+      "css": ".ds-step { display: inline-block; margin-right: 1rem; padding: 0.5rem 0.7rem; border: 1.5px solid #14171C; border-radius: 4px; background: #F3F4F5; color: #14171C; font-family: Archivo, sans-serif; font-size: 1.25rem; font-weight: 800; font-stretch: 118%; letter-spacing: -0.03em; line-height: 1; } .ds-step sup { font-size: 0.6em; vertical-align: 0.5em; line-height: 0; } .ds-minor { background: #1E2228; border-color: #1E2228; color: #EEF1F2; }"
+    },
+    {
+      "name": "Chord Plate",
+      "kind": "card",
+      "refersTo": "chord-plate",
+      "description": "Aluminium plate with chord name on rung 3, a quality tag and a share bar; lifts 2px on hover.",
+      "html": "<button class=\"ds-plate\"><span class=\"ds-name\">Em</span><span class=\"ds-q\">Minor</span><span class=\"ds-bar\"><span style=\"width:40%\"></span></span></button>",
+      "css": ".ds-plate { display: grid; grid-template-columns: 1fr auto; gap: 0.6rem 0.5rem; width: 180px; padding: 0.85rem 0.9rem 0.95rem; border: 1.5px solid rgba(20,23,28,0.5); border-radius: 5px; background: linear-gradient(180deg, #EEF0F1, #E2E5E7); box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 2px 6px rgba(20,23,28,0.14); color: #14171C; text-align: left; cursor: pointer; transition: transform 140ms cubic-bezier(0.16,1,0.3,1), box-shadow 160ms cubic-bezier(0.16,1,0.3,1), border-color 160ms; } .ds-plate:hover { transform: translateY(-2px); border-color: #14171C; box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 10px 20px rgba(20,23,28,0.18); } .ds-plate:active { transform: translateY(1px); } .ds-plate:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; } .ds-name { font-family: Archivo, sans-serif; font-size: 1.875rem; font-weight: 800; font-stretch: 118%; letter-spacing: -0.03em; line-height: 0.92; } .ds-q { align-self: start; padding: 0.25rem 0.4rem; border: 1.5px solid #1E2228; border-radius: 3px; background: #1E2228; color: #EEF1F2; font-family: Archivo, sans-serif; font-size: 0.625rem; font-weight: 700; font-stretch: 125%; letter-spacing: 0.12em; text-transform: uppercase; } .ds-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; overflow: hidden; background: rgba(20,23,28,0.14); } .ds-bar > span { display: block; height: 100%; background: #14171C; }"
+    },
+    {
+      "name": "Match Lamp",
+      "kind": "custom",
+      "refersTo": "match-green",
+      "description": "Smoked glass until the played chord matches the target; the only place green lights.",
+      "html": "<span class=\"ds-match\" tabindex=\"0\"></span>",
+      "css": ".ds-match { position: relative; display: inline-block; width: 78px; height: 78px; border-radius: 50%; border: 1px solid rgba(20,23,28,0.4); background: radial-gradient(circle closest-side, #7E858B 0 78%, #DDE1E4 82% 100%); box-shadow: 0 4px 10px rgba(20,23,28,0.3); } .ds-match::before, .ds-match::after { content: ''; position: absolute; inset: 10px; border-radius: 50%; } .ds-match::before { background: radial-gradient(circle at 34% 30%, rgba(255,255,255,0.36) 0 12%, transparent 16%), radial-gradient(circle at 50% 56%, #626A70, #353B40 58%, #15181A); } .ds-match::after { background: radial-gradient(circle at 34% 30%, rgba(255,255,255,0.8) 0 12%, transparent 16%), radial-gradient(circle at 50% 56%, #E3FFEE, #8AF5B0 32%, #2FB36A 68%, #17693C); box-shadow: 0 0 22px 6px rgba(47,179,106,0.5); opacity: 0; transition: opacity 120ms cubic-bezier(0.16,1,0.3,1); } .ds-match:hover::after, .ds-match:focus-visible::after { opacity: 1; } .ds-match:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; }"
+    },
+    {
+      "name": "Bat Switch",
+      "kind": "custom",
+      "refersTo": "bat-switch",
+      "description": "The mic control: a bat-handle lever that flips between STANDBY and LISTEN.",
+      "html": "<button class=\"ds-bat\" role=\"switch\" aria-checked=\"false\" onclick=\"this.setAttribute('aria-checked', this.getAttribute('aria-checked') !== 'true')\"><span class=\"ds-bat-body\"><span class=\"ds-lever\"></span></span><span class=\"ds-bat-state\">Standby</span></button>",
+      "css": ".ds-bat { display: inline-flex; align-items: center; gap: 0.9rem; min-height: 64px; padding: 0.45rem 1.15rem 0.45rem 0.55rem; border: 1.5px solid #14171C; border-radius: 6px; background: rgba(255,255,255,0.2); color: #14171C; cursor: pointer; transition: background-color 150ms; } .ds-bat:hover { background: rgba(255,255,255,0.45); } .ds-bat:focus-visible { outline: 2px solid #14171C; outline-offset: 3px; } .ds-bat-body { position: relative; width: 48px; height: 48px; border-radius: 50%; border: 1px solid rgba(20,23,28,0.4); background: radial-gradient(circle closest-side, #9CA3A8 0 58%, #DDE1E4 62% 100%); box-shadow: 0 2px 5px rgba(20,23,28,0.3); } .ds-lever { position: absolute; left: 50%; bottom: 50%; width: 12px; height: 30px; margin-left: -6px; border-radius: 6px 6px 4px 4px; background: linear-gradient(90deg, #6E767C, #F6F8F9 38%, #C8CED2 62%, #697177); box-shadow: 0 2px 4px rgba(0,0,0,0.4); transform-origin: 50% 100%; transform: scaleY(-1); transition: transform 170ms cubic-bezier(0.16,1,0.3,1); } .ds-bat[aria-checked='true'] .ds-lever { transform: scaleY(1); } .ds-bat-state { font-family: Archivo, sans-serif; font-size: 0.9375rem; font-weight: 800; font-stretch: 118%; letter-spacing: 0.1em; text-transform: uppercase; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Practice Amp Faceplate",
+    "overview": "LiveChord is built as the front of a 1960s-70s combo practice amp. A brushed aluminium control panel sits in a black tolex cabinet with cream piping; below it, sparkle grille cloth carries a black engraved instruction plate. Every control is a real amp part translated into a familiar web control: black push keys with a 3px skirt, a recessed input window, jewel-red lamps, a bat-handle toggle for the mic, printed 0-10 scales with red pointers for meters. Legends are silkscreened in expanded capitals, the way a manufacturer prints them.\n\nThe system is light only (`color-scheme: light`, theme colour set to the tolex). Density is that of an instrument panel: controls are grouped under ruled legends, rules are 1.5px ink, and nothing floats in rounded cards. Materials are drawn, not photographed: brushed metal, tolex grain, grille weave, sparkle and mottle are inline SVG data-URI textures on `:root`, so no bitmap ships for surface.\n\nMotion is mechanical and damped. Keys depress 2px, lamps warm on over about 180ms, the mic lever snaps in 170ms, meter pointers ease over 320ms, and only lamps that mean \"working\" blink. The picked song is one object that morphs through three named states (Pick a song, See its chords, Play along) with the View Transitions API. Reduced motion makes every change instant.",
+    "keyCharacteristics": [
+      "Brushed aluminium panel inside a tolex cabinet with a 3px piping border and 12px corner.",
+      "Silkscreen legends: bold, 125% wide, 0.14em tracked capitals.",
+      "One face (Archivo variable, wdth 62-125, wght 100-900) for everything, with chord names on a strict five-rung ladder.",
+      "Jewel red is the only indicator colour; match green exists for one state.",
+      "Black push keys with a visible skirt; latched keys sit 2px lower.",
+      "Textures are SVG, never raster."
+    ],
+    "rules": [
+      { "name": "The Palette Law", "body": "Match green lights only when the played chord matches the target. It appears nowhere else: not in success toasts, not in lamps, not in links, not in the favicon.", "section": "colors" },
+      { "name": "The Only Indicator Rule", "body": "Every lamp, LED and pointer is jewel red. A new status shows as a red lamp that is lit, dark or blinking, never as a new hue.", "section": "colors" },
+      { "name": "The Major Light, Minor Dark Rule", "body": "Wherever chords are listed (progression steps, timeline blocks, quality tags on plates), major chords print light (major-chip) and minor chords print on the key face (key-face, minor-chip-ink).", "section": "colors" },
+      { "name": "The One Face Rule", "body": "Archivo is the only family. Hierarchy comes from width, weight and the ladder, never a second face.", "section": "typography" },
+      { "name": "The Ladder Rule", "body": "A chord name takes the rung of its role. A new chord readout joins an existing rung; it does not get a new size.", "section": "typography" },
+      { "name": "The Only Lit Glows Rule", "body": "Glow belongs to a lit lens. Nothing else emits light.", "section": "elevation" },
+      { "name": "The Press Travels Down Rule", "body": "Pressing moves a control down (keys 2px, outline keys 1px, chord plates 1px). Nothing scales up on press.", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** keep match green (match-green) to the matched state only: the match lamp and the You and Target outlines.",
+      "**Do** show every new status as a jewel-red lamp that is lit, dark or blinking, and blink only for work in progress.",
+      "**Do** set chord names from the five-rung ladder, with raised accidentals and major-light, minor-dark printing.",
+      "**Do** label control groups with a silkscreen legend (700, 125% wide, 0.14em, uppercase) running into a ruled line.",
+      "**Do** make new controls from existing parts: push key, outline key, input window, bat switch, printed scale.",
+      "**Do** draw new textures and cover fallbacks as SVG in the panel palette, as `sleeve.svg` and the `:root` textures are.",
+      "**Do** make presses travel down and lamps fade on (120-220ms, `cubic-bezier(0.16, 1, 0.3, 1)`), and make every change instant under reduced motion."
+    ],
+    "donts": [
+      "**Don't** use green anywhere outside the matched state, or add a second indicator hue.",
+      "**Don't** introduce a second typeface or a chord-name size off the ladder.",
+      "**Don't** add a dark theme by inverting tokens; the page is light only, and a black-panel variant is not part of this system.",
+      "**Don't** use knobs or sliders as inputs; controls stay familiar (field, keys, toggles, switch).",
+      "**Don't** give glow to anything but a lit lens, or scale controls up on press.",
+      "**Don't** ship raster surface textures."
+    ]
+  }
+}
