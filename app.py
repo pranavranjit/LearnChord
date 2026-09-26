@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 import numpy as np
 import librosa
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -98,49 +99,47 @@ if SEARCH_BACKEND not in ("itunes", "youtube", "jamendo"):
 # to the top rather than whichever eight Jamendo happened to return first.
 JAMENDO_POOL      = 30
 
-def create_chord_templates():
-    templates = {}
-    for i, root in enumerate(PITCH_CLASSES):
-        maj = np.zeros(12)
-        maj[i]            = 1.3
-        maj[(i + 4) % 12] = 0.9
-        maj[(i + 7) % 12] = 1.0
-        templates[f"{root}"] = maj / np.linalg.norm(maj)
+# Downloaded audio is served back to the browser, so it must outlive the
+# request that fetched it: every request used to delete every earlier file,
+# which cut off whoever else was mid-song. Files now expire by age instead,
+# and analyses are cached for slightly less than that so a cached result
+# never points at a deleted file.
+AUDIO_TTL_SEC     = int(os.environ.get("AUDIO_TTL_SEC", str(60 * 60)))
+MAX_AUDIO_FILES   = int(os.environ.get("MAX_AUDIO_FILES", "60"))
+RESULT_CACHE_MAX  = 50
+SEARCH_CACHE_TTL  = 60 * 60
+SEARCH_CACHE_MAX  = 300
 
-        minor = np.zeros(12)
-        minor[i]            = 1.3
-        minor[(i + 3) % 12] = 0.9
-        minor[(i + 7) % 12] = 1.0
-        templates[f"{root}m"] = minor / np.linalg.norm(minor)
+# (title, artist) offered as one-click examples in the UI. They are analysed
+# in the background at boot, and kept warm, so a visitor's click is instant.
+EXAMPLE_SONGS = [
+    ("Let It Be", "The Beatles"),
+    ("Wonderwall", "Oasis"),
+    ("Riptide", "Vance Joy"),
+    ("Perfect", "Ed Sheeran"),
+    ("Someone Like You", "Adele"),
+]
+PREWARM_EXAMPLES = os.environ.get("PREWARM_EXAMPLES", "1") != "0"
 
-        power = np.zeros(12)
-        power[i]            = 1.4
-        power[(i + 7) % 12] = 1.0
-        templates[f"{root}5"] = power / np.linalg.norm(power)
-
-        sus2 = np.zeros(12)
-        sus2[i]            = 1.2
-        sus2[(i + 2) % 12] = 0.9
-        sus2[(i + 7) % 12] = 1.0
-        templates[f"{root}sus2"] = sus2 / np.linalg.norm(sus2)
-
-        sus4 = np.zeros(12)
-        sus4[i]            = 1.2
-        sus4[(i + 5) % 12] = 0.9
-        sus4[(i + 7) % 12] = 1.0
-        templates[f"{root}sus4"] = sus4 / np.linalg.norm(sus4)
-    return templates
-
-print("Initializing Chroma Chord Templates...")
-CHORD_TEMPLATES = create_chord_templates()
+# The UI only ever sends preview URLs that came from our own search results.
+# Accepting any URL would let the endpoint fetch arbitrary files on our
+# bandwidth, so the source hosts are allow-listed (ALLOW_ANY_AUDIO_URL=1 lifts it).
+ALLOWED_AUDIO_HOST_SUFFIXES = (".itunes.apple.com", ".mzstatic.com", "jamendo.com")
+ALLOW_ANY_AUDIO_URL = os.environ.get("ALLOW_ANY_AUDIO_URL", "0") == "1"
 
 def process_audio_chunk(audio_data):
+    """Classify the latest second of microphone audio.
+
+    Uses the same 24 major/minor templates as the song timeline. The extended
+    set (power, sus2, sus4) could label a chord "C5" or "Csus2", which never
+    equals a timeline target, so the practice view could not register a match.
+    """
     if audio_data.ndim > 1:
         audio_data = audio_data[:, 0]
 
-    rms = np.sqrt(np.mean(audio_data**2))
+    rms = float(np.sqrt(np.mean(audio_data**2)))
     if rms < VOLUME_THRESHOLD:
-        return {"chord": "--", "confidence": 0.0, "volume": float(rms)}
+        return {"chord": "--", "confidence": 0.0, "volume": rms}
 
     try:
         y_h = librosa.effects.harmonic(audio_data, margin=3)
@@ -152,17 +151,11 @@ def process_audio_chunk(audio_data):
 
     norm = np.linalg.norm(chroma_vector)
     if norm == 0:
-        return {"chord": "--", "confidence": 0.0, "volume": float(rms)}
-    chroma_vector = chroma_vector / norm
+        return {"chord": "--", "confidence": 0.0, "volume": rms}
 
-    best_chord, best_score = "--", 0.0
-    for name, template in CHORD_TEMPLATES.items():
-        score = float(np.dot(chroma_vector, template))
-        if score > best_score:
-            best_score = score
-            best_chord = name
-
-    return {"chord": best_chord, "confidence": float(best_score), "volume": float(rms)}
+    scores = CHORD_CLASS_TEMPLATES @ (chroma_vector / norm)
+    best = int(np.argmax(scores))
+    return {"chord": CHORD_CLASSES[best], "confidence": float(scores[best]), "volume": rms}
 
 _COOKIE_FILE = None
 _COOKIE_RESOLVED = False
@@ -259,6 +252,81 @@ def _itunes_search(query, limit=8):
             'audio_url': audio,
         })
     return out
+
+
+_SEARCH_CACHE = OrderedDict()
+_SEARCH_LOCK = threading.Lock()
+
+
+def _itunes_search_cached(query, limit=8):
+    """_itunes_search with an hour-long memory.
+
+    iTunes allows roughly 20 searches a minute per IP and every visitor's
+    autocomplete keystrokes share this server's IP, so repeated queries (the
+    example songs above all) are answered from memory. Errors are not cached.
+    """
+    key = ((query or '').strip().lower(), limit)
+    now = time.time()
+    with _SEARCH_LOCK:
+        hit = _SEARCH_CACHE.get(key)
+        if hit and now - hit[0] < SEARCH_CACHE_TTL:
+            _SEARCH_CACHE.move_to_end(key)
+            return hit[1]
+    rows = _itunes_search(query, limit=limit)
+    with _SEARCH_LOCK:
+        _SEARCH_CACHE[key] = (now, rows)
+        _SEARCH_CACHE.move_to_end(key)
+        while len(_SEARCH_CACHE) > SEARCH_CACHE_MAX:
+            _SEARCH_CACHE.popitem(last=False)
+    return rows
+
+
+_RESULT_CACHE = OrderedDict()
+_RESULT_LOCK = threading.Lock()
+_FILES_LOCK = threading.Lock()
+
+
+def _cached_result(key, max_age=None):
+    """A previous analysis of the same source, if its audio file still exists."""
+    with _RESULT_LOCK:
+        hit = _RESULT_CACHE.get(key)
+        if not hit:
+            return None
+        fresh = time.time() - hit["created"] < (max_age or AUDIO_TTL_SEC - 300)
+        if not fresh or not os.path.exists(os.path.join("static", hit["filename"])):
+            _RESULT_CACHE.pop(key, None)
+            return None
+        _RESULT_CACHE.move_to_end(key)
+        return hit["response"]
+
+
+def _store_result(key, filename, response):
+    with _RESULT_LOCK:
+        _RESULT_CACHE[key] = {"filename": filename, "response": response, "created": time.time()}
+        _RESULT_CACHE.move_to_end(key)
+        while len(_RESULT_CACHE) > RESULT_CACHE_MAX:
+            _RESULT_CACHE.popitem(last=False)
+
+
+def _prune_audio():
+    """Delete served audio older than AUDIO_TTL_SEC (and the oldest files past
+    MAX_AUDIO_FILES), never a file a cached result still points at."""
+    with _RESULT_LOCK:
+        keep = {v["filename"] for v in _RESULT_CACHE.values()}
+    with _FILES_LOCK:
+        files = sorted(glob.glob("static/downloaded_*"), key=os.path.getmtime)
+        now = time.time()
+        for i, f in enumerate(files):
+            if os.path.basename(f) in keep:
+                continue
+            too_old = now - os.path.getmtime(f) > AUDIO_TTL_SEC
+            too_many = len(files) - i > MAX_AUDIO_FILES
+            if too_old or too_many:
+                try:
+                    os.remove(f)
+                    print(f"[Cleanup] Deleted {f}")
+                except OSError:
+                    print(f"[Cleanup] Skipped (locked): {f}")
 
 
 def _to_playable(path):
@@ -404,15 +472,10 @@ def download_audio(query, video_id=None):
     import time as _time, uuid as _uuid
     print(f"\nSearching YouTube Music for: '{query}'...")
     os.makedirs("static", exist_ok=True)
+    _prune_audio()
 
-    # UUID filenames avoid Windows file-lock collisions when browser still holds previous file
-    for f in glob.glob("static/downloaded_*"):
-        try:
-            os.remove(f)
-            print(f"[Cleanup] Deleted {f}")
-        except OSError:
-            print(f"[Cleanup] Skipped (locked): {f}")
-
+    # UUID filenames keep concurrent visitors' songs apart (and avoid Windows
+    # file-lock collisions while a browser still holds an earlier file).
     out_base = f"static/downloaded_{_uuid.uuid4().hex[:12]}"
 
     if video_id:
@@ -577,6 +640,18 @@ def _assert_public_url(url):
     return parsed
 
 
+def _assert_allowed_host(url):
+    """Only fetch from the audio hosts our search backends hand out."""
+    from urllib.parse import urlparse
+
+    if ALLOW_ANY_AUDIO_URL:
+        return
+    host = (urlparse(url).hostname or "").lower()
+    if not any(host == s.lstrip(".") or host.endswith(s if s.startswith(".") else "." + s)
+               for s in ALLOWED_AUDIO_HOST_SUFFIXES):
+        raise ValueError("Only songs picked from the search results can be analysed.")
+
+
 class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
     """Re-validate on every hop; otherwise a public URL could 302 to localhost."""
 
@@ -592,14 +667,11 @@ def download_from_url(url):
     url = (url or '').strip()
     if not url:
         raise ValueError("Paste a link to an audio file first.")
+    _assert_allowed_host(url)
     _assert_public_url(url)
 
     os.makedirs("static", exist_ok=True)
-    for f in glob.glob("static/downloaded_*"):
-        try:
-            os.remove(f)
-        except OSError:
-            print(f"[Cleanup] Skipped (locked): {f}")
+    _prune_audio()
 
     opener = urllib.request.build_opener(_GuardedRedirect())
     req = urllib.request.Request(url, headers={
@@ -687,10 +759,12 @@ def _warm_up_dsp():
         print(f"[Warmup] skipped: {type(e).__name__}: {e}")
 
 
-# `python app.py` runs this file as __main__ and then uvicorn imports it again as
-# "app", so guard the thread or the JIT work is done twice, in parallel, for nothing.
-if __name__ != "__main__":
-    threading.Thread(target=_warm_up_dsp, daemon=True).start()
+# Chord estimates per connection are rate-limited: the browser sends a chunk
+# every ~190ms, and analysing each one (HPSS + CQT) on the event loop used to
+# stall every other visitor's request while someone played.
+LIVE_ANALYSIS_INTERVAL = 0.25
+LIVE_MIN_CONFIDENCE    = 0.60
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -698,19 +772,21 @@ async def websocket_endpoint(websocket: WebSocket):
     active_connections.append(websocket)
     audio_buffer = np.zeros(CHUNK_SAMPLES, dtype=np.float32)
     is_listening = False
-    import time as _time
-    last_predict_time = 0.0
+    last_analysis = 0.0
+    loop = asyncio.get_running_loop()
 
     try:
         while True:
             msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
 
-            if "text" in msg:
+            if msg.get("text"):
                 data = msg["text"]
                 if "START" in data:
                     is_listening = True
                     audio_buffer.fill(0)
-                    last_predict_time = 0.0
+                    last_analysis = 0.0
                     print("Listening started (browser mic).")
                 elif "STOP" in data:
                     is_listening = False
@@ -718,7 +794,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     print("Listening stopped.")
                 continue
 
-            if "bytes" in msg and is_listening:
+            if msg.get("bytes") and is_listening:
                 pcm = np.frombuffer(msg["bytes"], dtype=np.float32)
                 if len(pcm) == 0:
                     continue
@@ -727,13 +803,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 audio_buffer[:] = np.roll(audio_buffer, -new_len)
                 audio_buffer[-new_len:] = pcm[-new_len:]
 
-                result = process_audio_chunk(audio_buffer.copy())
-                if result:
-                    now = _time.time()
-                    if result['confidence'] > 0.60 and (now - last_predict_time > 1.0):
-                        print(f"Detected: {result['chord']} ({result['confidence']:.2f})", flush=True)
-                        await websocket.send_json(result)
-                        last_predict_time = now
+                now = time.monotonic()
+                if now - last_analysis < LIVE_ANALYSIS_INTERVAL:
+                    continue
+                last_analysis = now
+
+                result = await loop.run_in_executor(None, process_audio_chunk, audio_buffer.copy())
+                # Always report volume (it drives the meter); only commit to a
+                # chord when the template match is clear, or on silence.
+                result["confident"] = (
+                    result["chord"] == "--" or result["confidence"] >= LIVE_MIN_CONFIDENCE
+                )
+                await websocket.send_json(result)
 
     except WebSocketDisconnect:
         pass
@@ -967,20 +1048,22 @@ def extract_chords_from_file(filepath):
 # One analysis at a time by default. A single extraction peaks near 400MB and
 # Render's free tier caps at 512MB, so two at once would be OOM-killed mid
 # request; queueing is slower for the second user but survivable. Raise
-# MAX_CONCURRENT_ANALYSES on a bigger host.
-_EXTRACT_SEM = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_ANALYSES", "1")))
+# MAX_CONCURRENT_ANALYSES on a bigger host. A thread semaphore (taken inside
+# the worker thread) so the boot-time example analysis queues with requests.
+_EXTRACT_SEM = threading.BoundedSemaphore(int(os.environ.get("MAX_CONCURRENT_ANALYSES", "1")))
 
 
-async def _build_song_response(filename: str):
-    loop = asyncio.get_running_loop()
+class ExtractionError(RuntimeError):
+    """The audio downloaded but could not be turned into a chord timeline."""
+
+
+def _song_response(filename: str) -> dict:
     try:
-        async with _EXTRACT_SEM:
-            timeline = await loop.run_in_executor(
-                None, extract_chords_from_file, f"static/{filename}"
-            )
+        with _EXTRACT_SEM:
+            timeline = extract_chords_from_file(f"static/{filename}")
     except Exception as e:
         print(f"Chroma extraction error: {e}")
-        raise HTTPException(status_code=500, detail="Chord extraction failed.")
+        raise ExtractionError("Chord extraction failed.") from e
 
     chord_dur = {}
     for seg in timeline:
@@ -996,10 +1079,28 @@ async def _build_song_response(filename: str):
     return {"audio_url": f"/static/{filename}", "timeline": timeline, "main_chords": main_chords}
 
 
+def analyze_url(url: str, max_age=None) -> dict:
+    """Download and analyse a direct audio link, reusing a recent result
+    (one younger than ``max_age`` seconds, when given)."""
+    key = f"url:{(url or '').strip()}"
+    cached = _cached_result(key, max_age)
+    if cached:
+        print("[Cache] hit")
+        return cached
+    filename = download_from_url(url)
+    response = _song_response(filename)
+    _store_result(key, filename, response)
+    return response
+
+
 @app.post("/api/search")
 async def search_song(request: SearchQuery):
     loop = asyncio.get_running_loop()
     _q, _vid = request.query, request.video_id
+    cache_key = f"yt:{_vid or (_q or '').strip().lower()}"
+    cached = _cached_result(cache_key)
+    if cached:
+        return cached
     try:
         filename = await loop.run_in_executor(None, download_audio, _q, _vid)
     except Exception as exc:
@@ -1017,7 +1118,12 @@ async def search_song(request: SearchQuery):
     if not filename:
         raise HTTPException(status_code=400, detail="Couldn't fetch this song. Please try another.")
 
-    return await _build_song_response(filename)
+    try:
+        response = await loop.run_in_executor(None, _song_response, filename)
+    except ExtractionError:
+        raise HTTPException(status_code=500, detail="Chord extraction failed.")
+    _store_result(cache_key, filename, response)
+    return response
 
 
 @app.post("/api/from-url")
@@ -1025,20 +1131,23 @@ async def search_from_url(request: UrlQuery):
     """Analyse audio at a direct link, bypassing YouTube entirely."""
     loop = asyncio.get_running_loop()
     try:
-        filename = await loop.run_in_executor(None, download_from_url, request.url)
+        return await loop.run_in_executor(None, analyze_url, request.url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Couldn't fetch audio from that link.")
-
-    try:
-        return await _build_song_response(filename)
-    except HTTPException:
+    except ExtractionError:
         # Reaching here means the bytes downloaded but ffmpeg could not decode
         # them - usually an HTML error page served with an audio content type.
         raise HTTPException(
             status_code=400,
             detail="That link didn't contain audio we can read. Use a direct link to an audio file.")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Couldn't fetch audio from that link.")
+
+
+@app.get("/api/examples")
+async def examples():
+    """One-click example songs for the landing page."""
+    return [{"title": t, "artist": a, "query": f"{a} {t}"} for t, a in EXAMPLE_SONGS]
 
 
 def _ytmusic_search_with_retry(query, limit=8, attempts=3):
@@ -1106,7 +1215,7 @@ async def suggest_songs(q: str = ""):
         # results carry a directly playable preview URL.
         if SEARCH_BACKEND == "itunes":
             try:
-                return _itunes_search(q, limit=8)
+                return _itunes_search_cached(q, limit=8)
             except Exception as e:
                 print(f"[iTunes] search failed: {type(e).__name__}: {e}")
                 return []
@@ -1173,7 +1282,8 @@ async def autocomplete(q: str = ""):
         import time as _time
         if SEARCH_BACKEND == "itunes":
             try:
-                return _phrases(_itunes_search(q, limit=6))
+                # Same limit as /api/suggest so both share one cache entry.
+                return _phrases(_itunes_search_cached(q, limit=8))[:6]
             except Exception as e:
                 print(f"[Autocomplete] itunes failed: {type(e).__name__}")
                 return []
@@ -1324,6 +1434,38 @@ async def diag():
 @app.get("/")
 def read_root():
     return FileResponse("static/index.html")
+
+
+def _keep_examples_warm():
+    """Analyse the example songs at boot, then refresh them before their cached
+    results expire, so clicking one never waits on a download."""
+    if not PREWARM_EXAMPLES or SEARCH_BACKEND != "itunes":
+        return
+    refresh_every = max(600, AUDIO_TTL_SEC // 2)
+    while True:
+        ready = 0
+        for title, artist in EXAMPLE_SONGS:
+            try:
+                hits = _itunes_search_cached(f"{artist} {title}", limit=8)
+                if hits:
+                    analyze_url(hits[0]["audio_url"], max_age=refresh_every)
+                    ready += 1
+            except Exception as e:
+                print(f"[Prewarm] {title} skipped: {type(e).__name__}")
+        print(f"[Prewarm] {ready}/{len(EXAMPLE_SONGS)} example songs ready")
+        time.sleep(refresh_every - 300)
+
+
+def _boot_tasks():
+    _warm_up_dsp()
+    _keep_examples_warm()
+
+
+# `python app.py` runs this file as __main__ and then uvicorn imports it again as
+# "app", so guard the thread or the work is done twice, in parallel, for nothing.
+# Started last so everything the thread calls is already defined.
+if __name__ != "__main__":
+    threading.Thread(target=_boot_tasks, daemon=True).start()
 
 if __name__ == "__main__":
     import uvicorn
