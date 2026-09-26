@@ -1,7 +1,8 @@
 /* LiveChord: a practice-amp faceplate.
    Materials: brushed aluminium panel, black tolex cabinet with white piping,
    sparkle grille cloth. Jewel-red lamps are the only indicators; match green
-   is reserved for one state: you are playing the target chord. */
+   is reserved for one state: you are playing the target chord. Zilla Slab
+   prints what the maker silkscreened; Source Sans 3 carries reading copy. */
 
 :root {
     color-scheme: light;
@@ -51,13 +52,14 @@
     --plate-ink:   #EDEFF0;
     --plate-ink-2: #B4BCC2;
 
-    --face: 'Archivo', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --face: 'Source Sans 3', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --face-display: 'Zilla Slab', Rockwell, 'Roboto Slab', Georgia, serif;
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --gutter: clamp(16px, 4vw, 52px);
     --side: clamp(6px, 1.6vw, 24px);
     --content: 1180px;
 
-    /* one display face, one size ladder for chord names */
+    /* one display face (the slab), one size ladder for chord names */
     --rung-1: clamp(4rem, 2.9rem + 4.4vw, 6rem);   /* Now */
     --rung-2: clamp(2.25rem, 1.8rem + 1.6vw, 3rem);/* Next, You, Target */
     --rung-3: 1.875rem;                            /* chord plates */
@@ -131,22 +133,29 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 
 /* ------------------------------------------------------------------ silkscreen type */
 .legend {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     line-height: 1.2;
-    font-weight: 700;
-    font-stretch: 125%;
-    letter-spacing: 0.14em;
+    font-weight: 600;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--ink);
 }
-.legend-sm { font-size: 0.625rem; letter-spacing: 0.16em; }
+.legend-sm { font-size: 0.6875rem; letter-spacing: 0.12em; }
+
+/* The slab prints everything the maker silkscreened: headings, legends,
+   key legends and chord names. Numbers and reading copy stay in the sans. */
+.wordmark, .stage-search h1, #song-title, .strip-title, .plate-title,
+.legend, .state-btn, .key, .key-outline, .mode-toggle button, .drill-chip,
+.chord, .preset-title, .preset-n, .tag, .chord-quality, .result-pick,
+.bat-state, .how-steps h3, .specs dt, .cab-nav a {
+    font-family: var(--face-display);
+}
 
 .chord {
-    font-family: var(--face);
-    font-weight: 800;
-    font-stretch: 118%;
-    letter-spacing: -0.03em;
-    line-height: 0.92;
+    font-family: var(--face-display);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 0.95;
     white-space: nowrap;
     font-variant-numeric: lining-nums;
 }
@@ -184,7 +193,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     text-decoration: none;
     font-size: 0.75rem;
     font-weight: 700;
-    font-stretch: 118%;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     transition: color 150ms, background-color 150ms;
@@ -241,9 +249,8 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     padding: 0.3rem 0;
     font-size: clamp(1.25rem, 1.05rem + 0.8vw, 1.625rem);
     line-height: 1;
-    font-weight: 800;
-    font-stretch: 125%;
-    letter-spacing: -0.02em;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     color: var(--ink);
     text-decoration: none;
 }
@@ -276,7 +283,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     color: var(--ink-3);
     font-size: 0.6875rem;
     font-weight: 700;
-    font-stretch: 122%;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     white-space: nowrap;
@@ -402,10 +408,9 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     /* the key face, then the 3px skirt it travels on */
     background: linear-gradient(180deg, var(--cap-top), var(--cap) 60%, var(--cap) calc(100% - 3px), var(--key-skirt) calc(100% - 3px));
     color: var(--key-ink);
-    font-size: 0.875rem;
-    font-weight: 700;
-    font-stretch: 118%;
-    letter-spacing: 0.12em;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     white-space: nowrap;
     cursor: pointer;
@@ -453,7 +458,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     color: var(--ink);
     font-size: 0.8125rem;
     font-weight: 700;
-    font-stretch: 118%;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     white-space: nowrap;
@@ -467,18 +471,17 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 
 /* ------------------------------------------------------------------ 1 · pick a song */
 .stage-search h1 {
-    max-width: 15em;
-    font-size: clamp(2.125rem, 1.3rem + 3.4vw, 4rem);
-    line-height: 1;
-    font-weight: 800;
-    font-stretch: 116%;
-    letter-spacing: -0.035em;
+    max-width: 18em;
+    font-size: clamp(2.1rem, 1.5rem + 2.3vw, 3.2rem);
+    line-height: 1.04;
+    font-weight: 700;
+    letter-spacing: -0.012em;
 }
 .stage-search h1 span { display: inline-block; }
 .lede {
     max-width: 60ch;
     margin-top: clamp(14px, 2vw, 22px);
-    font-size: clamp(1rem, 0.96rem + 0.2vw, 1.125rem);
+    font-size: clamp(1.0625rem, 1rem + 0.3vw, 1.1875rem);
     line-height: 1.55;
     color: var(--ink-2);
 }
@@ -504,7 +507,7 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     background: var(--ink);
     opacity: 0.5;
 }
-.group-note { font-size: 0.875rem; color: var(--ink-3); }
+.group-note { font-size: 0.9375rem; color: var(--ink-3); }
 
 .input-row {
     display: grid;
@@ -629,7 +632,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     text-align: right;
     font-size: 0.9375rem;
     font-weight: 700;
-    font-stretch: 112%;
     font-variant-numeric: tabular-nums;
     color: var(--ink-2);
 }
@@ -675,7 +677,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     border-radius: 4px;
     font-size: 0.6875rem;
     font-weight: 700;
-    font-stretch: 122%;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--ink);
@@ -700,7 +701,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     text-align: left;
     text-transform: none;
     letter-spacing: 0;
-    font-stretch: 100%;
     white-space: normal;
 }
 .preset-top {
@@ -711,14 +711,13 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     padding-bottom: 0.9rem;
 }
 .preset-n {
-    font-size: 0.75rem;
-    font-weight: 700;
-    font-stretch: 125%;
-    letter-spacing: 0.08em;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
     color: var(--key-ink-2);
 }
-.preset-title { font-size: 1.0625rem; font-weight: 700; line-height: 1.2; color: var(--key-ink); }
-.preset-artist { font-size: 0.8125rem; font-weight: 500; line-height: 1.3; color: var(--key-ink-2); }
+.preset-title { font-size: 1.2rem; font-weight: 700; line-height: 1.15; color: var(--key-ink); }
+.preset-artist { font-family: var(--face); font-size: 0.875rem; font-weight: 500; line-height: 1.3; color: var(--key-ink-2); }
 .preset .lamp { width: 9px; height: 9px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5), 0 1px 1px rgba(255, 255, 255, 0.12); }
 .key.preset:disabled {
     --cap-top: var(--key-top);
@@ -752,10 +751,9 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 .song-meta { grid-area: meta; min-width: 0; }
 #song-title {
     font-size: clamp(1.75rem, 1.25rem + 1.8vw, 2.75rem);
-    line-height: 1.02;
-    font-weight: 800;
-    font-stretch: 112%;
-    letter-spacing: -0.03em;
+    line-height: 1.04;
+    font-weight: 700;
+    letter-spacing: -0.015em;
     text-wrap: balance;
     overflow-wrap: anywhere;
 }
@@ -768,7 +766,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     border-radius: 3px;
     font-size: 0.6875rem;
     font-weight: 700;
-    font-stretch: 122%;
     letter-spacing: 0.14em;
     text-transform: uppercase;
 }
@@ -825,7 +822,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     border-radius: 3px;
     font-size: 0.625rem;
     font-weight: 700;
-    font-stretch: 125%;
     letter-spacing: 0.12em;
     text-transform: uppercase;
 }
@@ -920,7 +916,7 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 .strip-meta { min-width: 0; }
 .strip-title,
 .strip-artist { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.strip-title { font-size: 1.125rem; line-height: 1.15; font-weight: 800; font-stretch: 112%; letter-spacing: -0.01em; }
+.strip-title { font-size: 1.125rem; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; }
 .strip-artist { font-size: 0.875rem; color: var(--ink-2); }
 
 .deck {
@@ -972,7 +968,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     color: var(--key-ink);
     font-size: 0.9375rem;
     font-weight: 700;
-    font-stretch: 112%;
     letter-spacing: 0.04em;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -1057,7 +1052,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     transform: translateX(-50%);
     font-size: 0.6875rem;
     font-weight: 700;
-    font-stretch: 112%;
     letter-spacing: 0.02em;
     font-variant-numeric: tabular-nums;
     color: var(--ink-2);
@@ -1140,8 +1134,7 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 .bat-copy { display: flex; flex-direction: column; gap: 0.1rem; }
 .bat-state {
     font-size: 0.9375rem;
-    font-weight: 800;
-    font-stretch: 118%;
+    font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
 }
@@ -1266,8 +1259,7 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 }
 .gauge-val {
     font-size: 1.25rem;
-    font-weight: 800;
-    font-stretch: 112%;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
 }
 .gauge-count { grid-template-columns: auto; min-width: 8rem; }
@@ -1309,7 +1301,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     height: 14px;
     font-size: 0.625rem;
     font-weight: 700;
-    font-stretch: 112%;
     line-height: 14px;
     color: var(--ink-2);
 }
@@ -1362,8 +1353,7 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 .plate-title {
     font-size: clamp(1.625rem, 1.2rem + 1.4vw, 2.25rem);
     line-height: 1.05;
-    font-weight: 800;
-    font-stretch: 116%;
+    font-weight: 700;
     letter-spacing: -0.02em;
 }
 .how-steps {
@@ -1379,7 +1369,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     gap: 0.6rem;
     font-size: 0.8125rem;
     font-weight: 700;
-    font-stretch: 125%;
     letter-spacing: 0.14em;
     text-transform: uppercase;
 }
@@ -1419,7 +1408,6 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
     padding-top: 0.2rem;
     font-size: 0.6875rem;
     font-weight: 700;
-    font-stretch: 125%;
     letter-spacing: 0.14em;
     text-transform: uppercase;
 }

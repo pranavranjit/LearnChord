@@ -28,8 +28,10 @@ in expanded caps; black tolex #1C1C1E frame with white piping; sparkle grille
 cloth #A9BDBE field; jewel-red #D9342B lamps and LEDs are the only
 indicators; black push keys; a bat toggle for the mic; printed 0-10 scales
 with pointers for meters. Palette law: match green #2FB36A lights only when
-your chord matches the target, nowhere else. One display face (Archivo,
-expanded) sets chord names on a strict ladder: Now > Next / You / Target >
+your chord matches the target, nowhere else. One display face (Zilla Slab,
+picked by the user in a live typeset round on 2026-09-26; Source Sans 3 sets
+reading copy and numbers) prints headings, legends, key legends and chord
+names, with chord names on a strict ladder: Now > Next / You / Target >
 chord plates > progression > timeline.
 
 STORY: The visitor sees an amp front and reads "Hear a song. See its chords.
